@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>LeafCatch</title>
+    <style>
+        *{
+            margin: 0;
+            padding: 0;
+        }
+        canvas{
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script src="js/App.js"></script>
+    <script>
+        (function(doc){
+            'use strict';
+
+            const unitSizePx = 60;
+            const unitOrder = 5;
+
+            const canvas = doc.createElement('canvas');
+            canvas.width = unitSizePx * unitOrder * 2;
+            canvas.height = unitSizePx * unitOrder;
+            doc.body.appendChild(canvas);
+
+            const environment = new App.Environment({
+                width: unitOrder * 2,
+                height: unitOrder
+            });
+
+            const agent = new App.Agent();
+            environment.add(agent, 1, 1);
+
+            const render = new App.Render(canvas);
+            environment.setRender(render);
+
+            environment.execute();
+        })(document);
+    </script>
+</body>
+</html>
