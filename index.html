@@ -32,13 +32,14 @@
                 height: unitOrder
             });
 
-            const agent = new App.Agent();
-            environment.add(agent, 1, 1);
-
             const render = new App.Render(canvas);
             environment.setRender(render);
 
+            const agent = new App.Agent();
+            environment.add(agent, 1, 1);
+
             environment.execute();
+            agent.execute();
         })(document);
     </script>
 </body>
