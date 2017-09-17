@@ -7,7 +7,7 @@ window.App = (function(){
     const ACTION_PROGRESSED_EVENT = Symbol('action_progressed_event');
     const CAPTURED_VIEW_EVENT = Symbol('captured_view_event');
 
-    const TOP_ACTION = Symbol('top_action');
+    const UP_ACTION = Symbol('up_action');
     const RIGHT_ACTION = Symbol('right_action');
     const DOWN_ACTION = Symbol('down_action');
     const LEFT_ACTION = Symbol('left_action');
@@ -17,6 +17,10 @@ window.App = (function(){
     const INITIALIZED = Symbol('initialized');
     const OPERATING = Symbol('operating');
 
+    function canonicalPosition(...arr){
+        return arr.join(' ');
+    }
+
     class Environment{
         constructor(config = {}){
             this.objects = [];
@@ -24,17 +28,14 @@ window.App = (function(){
             this.config = Object.assign({
                 width: 30,
                 height: 30,
-                cycleDuration: 1000
+                cycleDuration: 500,
+                viewRadius: 2
             }, config);
         }
 
         add(object, ...position){
             this.objects.push(object);
             this.moveObject(object, ...position);
-        }
-
-        setRender(render){
-            this.render = render;
         }
 
         execute(){
@@ -44,11 +45,52 @@ window.App = (function(){
 
         execCycle(){
             this.progressActions();
-            this.draw();
         }
 
         getViewFor(agent){
-            // TODO
+            const positions = this.getViewPositionsFor(agent);
+            return this.getSquaresFor(positions);
+        }
+
+        getViewPositionsFor(agent){
+            const arr = [];
+            const radius = this.config.viewRadius;
+            const [agentX, agentY] = agent.getPosition();
+            const toX = Math.min(agentX + radius + 1, this.config.width);
+            for(let x = Math.max(agentX - radius, 0); x < toX; x++){
+                const valueY = Math.sqrt(Math.pow(radius, 2) - Math.pow(x - agentX, 2));
+                const roundedY = Math.floor(valueY);
+                const toY = Math.min(agentY + roundedY + 1, this.config.height);
+                for(let y = Math.max(agentY - roundedY, 0); y < toY; y++)
+                    arr.push([x, y]);
+            }
+
+            return arr;
+        }
+
+        getSquaresFor(positions){
+            const self = this;
+            const squares = positions.reduce(function(obj, [x, y]){
+                const key = canonicalPosition(x, y);
+
+                let blockedSideQuantity = 0;
+                if(x === 0 || x === self.getWidth() - 1)
+                    blockedSideQuantity++;
+
+                if(y === 0 || y === self.getHeight() - 1)
+                    blockedSideQuantity++;
+
+                obj[key] = new Square(x, y, blockedSideQuantity);
+                return obj;
+            }, {});
+
+            this.objects.forEach(function(object){
+                const key = canonicalPosition(...object.getPosition());
+                if(squares[key])
+                    squares[key].add(object);
+            });
+
+            return Object.values(squares);
         }
 
         agents(){
@@ -89,7 +131,7 @@ window.App = (function(){
 
         getNewPositionFromActionType(type, positionArr){
              const movements = {
-                [TOP_ACTION]: [0, -1],
+                [UP_ACTION]: [0, -1],
                 [DOWN_ACTION]: [0, 1],
                 [RIGHT_ACTION]: [1, 0],
                 [LEFT_ACTION]: [-1, 0]
@@ -113,11 +155,6 @@ window.App = (function(){
                 const ev = new Event(this, MOVED_EVENT, data);
                 object.sensor.send(ev);
             }
-        }
-
-        draw(){
-            if(this.render)
-                this.render.draw(this);
         }
 
         getObjects(){
@@ -169,7 +206,7 @@ window.App = (function(){
 
         duration(){
             switch(this.type){
-            case TOP_ACTION: case RIGHT_ACTION: case DOWN_ACTION: case LEFT_ACTION:
+            case UP_ACTION: case RIGHT_ACTION: case DOWN_ACTION: case LEFT_ACTION:
                 return 1;
             case DROP_LEAF_ACTION:
                 return 2;
@@ -179,7 +216,7 @@ window.App = (function(){
         }
 
         isMovement(){
-            return this.typeIs(TOP_ACTION, RIGHT_ACTION, DOWN_ACTION, LEFT_ACTION);
+            return this.typeIs(UP_ACTION, RIGHT_ACTION, DOWN_ACTION, LEFT_ACTION);
         }
 
         typeIs(...types){
@@ -189,7 +226,28 @@ window.App = (function(){
         getType(){
             return this.type;
         }
-   }
+    }
+
+    class Square{
+        constructor(x, y, blockedSideQuantity){
+            this.x = x;
+            this.y = y;
+            this.blockedSideQuantity = blockedSideQuantity;
+            this.objects = [];
+        }
+
+        add(object){
+            this.objects.push(object);
+        }
+
+        getPosition(){
+            return [this.x, this.y];
+        }
+
+        getBlockedSideQuantity(){
+            return this.blockedSideQuantity;
+        }
+    }
 
     class Thing{
         getPosition(){
@@ -209,11 +267,12 @@ window.App = (function(){
             this.actuator = new Actuator(this);
 
             this.state = {
-                status: INITIALIZED
+                status: INITIALIZED,
+                world: new WorldModel()
             };
 
             this.config = Object.assign({
-                reasoningInterval: 500
+                reasoningInterval: 200
             }, config);
         }
 
@@ -241,11 +300,19 @@ window.App = (function(){
             const chain = [
                 this.updateStateStatus,
                 this.updateStatePosition,
-                this.removeFinishedActionFromActuator
+                this.removeFinishedActionFromActuator,
+                this.updateWorldModel
             ];
-            const cloneState = Object.assign({}, state);
 
+            const cloneState = this.cloneState(state);
             return chain.reduce((newState, fun) => fun.call(this, newState, ev), cloneState);
+        }
+
+        cloneState(state){
+            const newState = Object.assign({}, state);
+            newState.world = state.world.clone();
+
+            return newState;
         }
 
         updateStateStatus(state, ev){
@@ -273,18 +340,65 @@ window.App = (function(){
             return state;
         }
 
+        updateWorldModel(state, ev){
+            if(ev.typeIs(CAPTURED_VIEW_EVENT))
+                state.world.applyView(ev.getData());
+
+            return state;
+        }
+
         deliberate(state){
-            const actionTypes = [TOP_ACTION, RIGHT_ACTION, DOWN_ACTION, LEFT_ACTION];
-            const randomIndex = Math.floor(actionTypes.length * Math.random());
-            return actionTypes[randomIndex];
+            const chain = [
+                this.shouldExploreWorld
+            ];
+
+            for(let fun of chain){
+                const actionType = fun.call(this, state);
+                if(actionType)
+                    return actionType;
+            }
+
+            return null;
+        }
+
+        shouldExploreWorld(state){
+            const squares = state.world.getSquaresWithUnknowNeighbours();
+            const sortedSquares = squares.map(square => ({square, distance: this.distanceTo(state.position, square.getPosition())}))
+                .sort((a, b) => a.distance - b.distance)
+                .map(obj => obj.square);
+
+            if(sortedSquares.length)
+                return this.actionTowards(state.position, sortedSquares[0].getPosition());
+        }
+
+        distanceTo(from, to){
+            const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index]));
+            return Math.sqrt(value);
+        }
+
+        actionTowards(from, to){
+            const actions = [
+                [RIGHT_ACTION, LEFT_ACTION],
+                [DOWN_ACTION, UP_ACTION]
+            ];
+
+            const axisDiff = actions.map(function(arr, index){
+                const axisFrom = from[index];
+                const axisTo = to[index];
+                return {
+                    diff: Math.abs(axisFrom - axisTo),
+                    action: arr[axisFrom < axisTo ? 0 : 1]
+                };
+            });
+
+            const sortedAxisDiff = axisDiff.filter(obj => obj.diff > 0)
+                .sort((a, b) => b.diff - a.diff);
+
+            return sortedAxisDiff.length ? sortedAxisDiff[0].action : null;
         }
 
         act(actionType){
             this.actuator.setAction(actionType);
-        }
-
-        draw(render){
-            render.drawCircle(...render.pixelPositionFor(...this.position), render.config.unitSizePx * .25, render.config.agentColor);
         }
     }
 
@@ -356,11 +470,77 @@ window.App = (function(){
         }
     }
 
-    // class WorldModel(){
-    // }
+    class WorldModel{
+        constructor(index = {}){
+            this.index = index;
+        }
+
+        applyView(view){
+            view.forEach(square => this.applySquare(square));
+        }
+
+        applySquare(square){
+            const key = canonicalPosition(...square.getPosition());
+            this.index[key] = {
+                square,
+                timestamp: Date.now()
+            };
+        }
+
+        clone(){
+            const index = Object.assign({}, this.index);
+            return new WorldModel(index);
+        }
+
+        getSquaresWithUnknowNeighbours(){
+            const additionMatrix = [
+                [0, -1],
+                [1, 0],
+                [0, 1],
+                [-1, 0]
+            ];
+
+            const index = this.index;
+            const values = Object.values(index);
+            const knowNeighboursIndex = values.reduce(function(carry, obj){
+                const squarePosition = obj.square.getPosition();
+                const squareKey = canonicalPosition(...squarePosition);
+
+                if(!carry[squareKey])
+                    carry[squareKey] = 0;
+                carry[squareKey] += obj.square.getBlockedSideQuantity();
+
+                additionMatrix.forEach(function(arr){
+                    const position = squarePosition.map((value, index) => value + arr[index]);
+                    const key = canonicalPosition(...position);
+
+                    if(index[key]){
+                        if(!carry[key])
+                            carry[key] = 0;
+
+                        carry[key]++;
+                    }
+                });
+
+                return carry;
+            }, {});
+
+            return Object.keys(knowNeighboursIndex)
+                .map(key => ({knowNeighbours: knowNeighboursIndex[key], square: index[key]}))
+                .filter(obj => obj.knowNeighbours < 4)
+                .sort((a, b) => a.knowNeighbours - b.knowNeighbours)
+                .map(obj => obj.square.square);
+        }
+
+        getSquaresForVisit(){
+            // TODO
+        }
+   }
 
     class Render{
-        constructor(element, config = {}){
+        constructor(environment, element, config = {}){
+            this.environment = environment;
+
             this.htmlElement = element;
             this.context = this.htmlElement.getContext('2d');
 
@@ -369,24 +549,26 @@ window.App = (function(){
                 unitStrokePx: 2,
                 backgroundColor: '#947064',
                 backgroundStrokeColor: '#836053',
-                agentColor: '#CD511D'
+                agentColor: '#CD511D',
+                unobservedColor: 'rgba(0, 0, 0, .5)'
             }, config);
+
+            if(this.config.unitSizePx === null)
+                this.config.unitSizePx = this.htmlElement.width / this.environment.getWidth();
         }
 
-        draw(environment){
-            this.prepareFor(environment);
+        execute(){
+            this.draw();
+        }
+
+        draw(){
+            requestAnimationFrame(this.draw.bind(this));
 
             this.context.save();
 
-            this.drawBackground(environment);
-
-            const sortedObjects = environment.getObjects().sort((a, b) => this.getZIndexFor(a) - this.getZIndexFor(b));
-            sortedObjects.forEach(obj => this.drawObject(obj));
-        }
-
-        prepareFor(environment){
-            if(this.config.unitSizePx === null)
-                this.config.unitSizePx = this.htmlElement.width / environment.getWidth();
+            this.drawBackground(this.environment);
+            this.drawObjects(this.environment.getObjects());
+            this.drawObservedArea(this.environment.agents());
         }
 
         drawBackground(environment){
@@ -398,14 +580,32 @@ window.App = (function(){
             this.context.fillStyle = this.config.backgroundColor;
             this.context.strokeStyle = this.config.backgroundStrokeColor;
             this.context.lineWidth = this.config.unitStrokePx;
+
+            this.iteratePositions(function(x, y){
+                const args = [...this.getPixelPosition(x, y), unitSizePx, unitSizePx];
+                this.context.fillRect(...args);
+                this.context.strokeRect(...args);
+            });
+        }
+
+        iteratePositions(callback){
+            const width = this.environment.getWidth();
+            const height = this.environment.getHeight();
             for(let x = 0; x < width; x++){
-                const leftPx = x * unitSizePx;
-                for(let y = 0; y < height; y++){
-                    const topPx = y * unitSizePx;
-                    this.context.fillRect(leftPx, topPx, unitSizePx, unitSizePx);
-                    this.context.strokeRect(leftPx, topPx, unitSizePx, unitSizePx);
-                }
+                for(let y = 0; y < height; y++)
+                    callback.call(this, x, y);
             }
+        }
+
+        getPixelPosition(...position){
+            return position.map(value => value * this.config.unitSizePx);
+        }
+
+        drawObjects(objects){
+            objects.map(object => ({object, zIndex: this.getZIndexFor(object)}))
+                .sort((a, b) => a.zIndex - b.zIndex)
+                .map(obj => obj.object)
+                .forEach(object => this.drawObject(object));
         }
 
         getZIndexFor(object){
@@ -416,12 +616,23 @@ window.App = (function(){
         }
 
         drawObject(object){
-            object.draw(this);
+            const position = object.getPosition();
+            const pixelPosition = this.getPixelPosition(...position);
+            this.context.translate(...pixelPosition);
+
+            this.drawSpecificObject(object);
+
             this.context.restore();
         }
 
-        pixelPositionFor(...position){
-            return position.map(value => this.config.unitSizePx * (value + .5));
+        drawSpecificObject(object){
+            if(object instanceof Agent)
+                return this.drawAgent(object);
+        }
+
+        drawAgent(agent){
+            const unitSize = this.config.unitSizePx;
+            this.drawCircle(unitSize / 2, unitSize / 2, unitSize * .25, this.config.agentColor);
         }
 
         drawCircle(x, y, radius, color){
@@ -430,6 +641,31 @@ window.App = (function(){
             this.context.fillStyle = color;
             this.context.fill(path);
         }
+
+        drawObservedArea(agents){
+            const observedPositions = agents.reduce((carry, agent) => this.addObservedPositionsFromAgent(carry, agent), {});
+
+            this.context.fillStyle = this.config.unobservedColor;
+            this.iteratePositions((x, y) => this.drawUnobservedSquares(observedPositions, x, y));
+
+            this.context.restore();
+        }
+
+        addObservedPositionsFromAgent(obj, agent){
+            const positions = this.environment.getViewPositionsFor(agent);
+            positions.forEach(arr => obj[canonicalPosition(...arr)] = true);
+
+            return obj;
+        }
+
+        drawUnobservedSquares(observedPositions, x, y){
+            const key = canonicalPosition(x, y);
+            if(observedPositions[key])
+                return;
+
+            const pixels = this.getPixelPosition(x, y);
+            this.context.fillRect(...pixels, this.config.unitSizePx, this.config.unitSizePx);
+       }
     }
 
     return {

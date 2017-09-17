@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>LeafCatch</title>
+    <title>LeafCatcher</title>
     <style>
         *{
             margin: 0;
@@ -31,15 +31,14 @@
                 width: unitOrder * 2,
                 height: unitOrder
             });
-
-            const render = new App.Render(canvas);
-            environment.setRender(render);
+            environment.execute();
 
             const agent = new App.Agent();
             environment.add(agent, 1, 1);
-
-            environment.execute();
             agent.execute();
+
+            const render = new App.Render(environment, canvas);
+            render.execute();
         })(document);
     </script>
 </body>
