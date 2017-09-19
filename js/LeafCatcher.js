@@ -349,7 +349,8 @@
 
         deliberate(state){
             const chain = [
-                this.shouldExploreWorld
+                this.shouldExploreWorld,
+                this.shouldVisitOldSquares
             ];
 
             for(let fun of chain){
@@ -369,6 +370,14 @@
 
             if(sortedSquares.length)
                 return this.actionTowards(state.position, sortedSquares[0].getPosition());
+        }
+
+        shouldVisitOldSquares(state){
+            const squares = state.world.getSquaresForVisit();
+            if(squares.length){
+                const randomNumber = Math.floor(Math.random() * squares.length);
+                return this.actionTowards(state.position, squares[randomNumber].getPosition());
+            }
         }
 
         distanceTo(from, to){
@@ -533,7 +542,16 @@
         }
 
         getSquaresForVisit(){
-            // TODO
+            const squares = Object.values(this.index);
+            const sortedSquares = squares.sort((a, b) => a.timestamp - b.timestamp);
+
+            if(sortedSquares.length){
+                const limit = sortedSquares[0].timestamp;
+                const oldestSquares = sortedSquares.filter(obj => obj.timestamp === limit);
+                return oldestSquares.map(obj => obj.square);
+            }
+
+            return sortedSquares.map(obj => obj.square);
         }
    }
 
