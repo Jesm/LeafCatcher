@@ -1,4 +1,4 @@
-window.App = (function(){
+(function(){
     'use strict';
 
     const MOVED_EVENT = Symbol('moved_event');
@@ -668,9 +668,13 @@ window.App = (function(){
        }
     }
 
-    return {
+    const $ = {
         Environment,
         Agent,
         Render
     };
+
+    window.LeafCatcher = $;
+
+    return $;
 })();
