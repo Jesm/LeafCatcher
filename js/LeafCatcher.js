@@ -6,31 +6,61 @@
     const ACTION_FAILED_EVENT = Symbol('action_failed_event');
     const ACTION_PROGRESSED_EVENT = Symbol('action_progressed_event');
     const CAPTURED_VIEW_EVENT = Symbol('captured_view_event');
+    const CATCH_EVENT = Symbol('catch_event');
+    const DROP_EVENT = Symbol('drop_event');
 
     const UP_ACTION = Symbol('up_action');
     const RIGHT_ACTION = Symbol('right_action');
     const DOWN_ACTION = Symbol('down_action');
     const LEFT_ACTION = Symbol('left_action');
-    const CATCH_LEAF_ACTION = Symbol('catch_leaf_action');
-    const DROP_LEAF_ACTION = Symbol('drop_leaf_action');
+    const CATCH_ACTION = Symbol('catch_action');
+    const DROP_ACTION = Symbol('drop_action');
 
     const INITIALIZED = Symbol('initialized');
     const OPERATING = Symbol('operating');
 
-    function canonicalPosition(...arr){
-        return arr.join(' ');
-    }
+    const canonicalPosition = (...arr) => arr.join(' ');
+    const randomNumber = number => Math.floor(Math.random() * number);
 
     class Environment{
         constructor(config = {}){
             this.objects = [];
+            this.leaves = [];
 
             this.config = Object.assign({
                 width: 30,
                 height: 30,
-                cycleDuration: 500,
+                cycleDuration: 400,
                 viewRadius: 2
             }, config);
+        }
+
+        addAtRandom(object){
+            const position = this.getAvailableRandomPosition();
+            if(position)
+                this.add(object, ...position);
+        }
+
+        getAvailableRandomPosition(){
+            const positionsIndex = {};
+            const width = this.getWidth();
+            const height = this.getHeight();
+
+            for(let len = width * height; len--;){
+                const x = len % width;
+                const y = Math.floor(len / width);
+                const key = canonicalPosition(x, y);
+                positionsIndex[key] = [x, y];
+            }
+
+            this.objects.forEach(object => {
+                const position = object.getPosition();
+                const key = canonicalPosition(...position);
+                delete positionsIndex[key];
+            });
+
+            const positions = Object.values(positionsIndex);
+            return positions.length ? positions[randomNumber(positions.length)] : null;
         }
 
         add(object, ...position){
@@ -69,32 +99,27 @@
         }
 
         getSquaresFor(positions){
-            const self = this;
-            const squares = positions.reduce(function(obj, [x, y]){
+            const squares = positions.reduce((obj, [x, y]) => {
                 const key = canonicalPosition(x, y);
 
                 let blockedSideQuantity = 0;
-                if(x === 0 || x === self.getWidth() - 1)
+                if(x === 0 || x === this.getWidth() - 1)
                     blockedSideQuantity++;
 
-                if(y === 0 || y === self.getHeight() - 1)
+                if(y === 0 || y === this.getHeight() - 1)
                     blockedSideQuantity++;
 
                 obj[key] = new Square(x, y, blockedSideQuantity);
                 return obj;
             }, {});
 
-            this.objects.forEach(function(object){
+            this.objects.forEach(object => {
                 const key = canonicalPosition(...object.getPosition());
                 if(squares[key])
                     squares[key].add(object);
             });
 
             return Object.values(squares);
-        }
-
-        agents(){
-            return this.objects.filter(obj => obj instanceof Agent);
         }
 
         progressActions(){
@@ -109,13 +134,19 @@
             const success = this.executeAction(agent, action);
 
             const eventType = success ? (action.isComplete() ? ACTION_COMPLETE_EVENT : ACTION_PROGRESSED_EVENT) : ACTION_FAILED_EVENT;
-            const ev = new Event(this, eventType, action);
-            agent.sensor.send(ev);
+            const event = new Event(this, eventType, action);
+            agent.sensor.send(event);
         }
 
         executeAction(agent, action){
             if(action.isMovement())
                 return this.executeMovementAction(agent, action);
+
+            if(action.typeIs(CATCH_ACTION))
+                return this.executeCatchAction(agent, action);
+
+            if(action.typeIs(DROP_ACTION))
+                return this.executeDropAction(agent, action);
         }
 
         executeMovementAction(agent, action){
@@ -123,6 +154,48 @@
             if(this.isInBound(...newPosition)){
                 this.moveObject(agent, ...newPosition);
                 action.increaseProgress();
+                return true;
+            }
+
+            return false;
+        }
+
+        executeCatchAction(agent, action){
+            if(agent.carriesSomething())
+                return false;
+
+            const objects = this.objectsInSamePosition(agent);
+            const leaves = objects.filter(object => object instanceof Leaf)
+                .filter(object => !object.beingCarried());
+
+            if(leaves.length){
+                action.increaseProgress();
+                if(action.isComplete())
+                    this.attachTo(leaves[0], agent);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        executeDropAction(agent, action){
+            if(!agent.carriesSomething())
+                return false;
+
+            const objects = this.objectsInSamePosition(agent);
+            const holes = objects.filter(object => object instanceof Hole);
+
+            if(holes.length){
+                action.increaseProgress();
+                if(action.isComplete()){
+                    const object = agent.getCarriedObject();
+                    this.dettachFrom(object, agent);
+
+                    if(object instanceof Leaf)
+                        this.consumeLeaf(object);
+                }
+
                 return true;
             }
 
@@ -155,10 +228,51 @@
                 const ev = new Event(this, MOVED_EVENT, data);
                 object.sensor.send(ev);
             }
+
+            if(object.carriesSomething())
+                this.moveObject(object.getCarriedObject(), ...position);
+        }
+
+        objectsInSamePosition(object){
+            const position = object.getPosition();
+            const sameValue = (value, index) => value === position[index];
+            return this.objects.filter(object => object.getPosition().every(sameValue))
+                .filter(obj => obj != object);
+        }
+
+        attachTo(object, agent){
+            object.setCarrierObject(agent);
+            agent.setCarriedObject(object);
+
+            if(agent instanceof Agent){
+                const event = new Event(this, CATCH_EVENT, {object});
+                agent.sensor.send(event);
+            }
+        }
+
+        dettachFrom(object, agent){
+            object.setCarrierObject(null);
+            agent.setCarriedObject(null);
+
+            if(agent instanceof Agent){
+                const event = new Event(this, DROP_EVENT, {object});
+                agent.sensor.send(event);
+            }
+        }
+
+        consumeLeaf(leaf){
+            const index = this.objects.indexOf(leaf);
+            this.objects.splice(index, 1);
+
+            this.leaves.push(leaf);
         }
 
         getObjects(){
             return this.objects.slice();
+        }
+
+        agents(){
+            return this.objects.filter(obj => obj instanceof Agent);
         }
 
         getWidth(){
@@ -208,9 +322,9 @@
             switch(this.type){
             case UP_ACTION: case RIGHT_ACTION: case DOWN_ACTION: case LEFT_ACTION:
                 return 1;
-            case DROP_LEAF_ACTION:
+            case DROP_ACTION:
                 return 2;
-            case CATCH_LEAF_ACTION:
+            case CATCH_ACTION:
                 return 3;
             }
         }
@@ -250,6 +364,11 @@
     }
 
     class Thing{
+        constructor(){
+            this.carries = null;
+            this.carrier = null;
+        }
+
         getPosition(){
             return this.position;
         }
@@ -257,6 +376,36 @@
         setPosition(x, y){
             this.position = [x, y];
         }
+
+        setCarriedObject(object){
+            this.carries = object;
+        }
+
+        setCarrierObject(object){
+            this.carrier = object;
+        }
+
+        getCarriedObject(){
+            return this.carries;
+        }
+
+        getCarrierObject(){
+            return this.carrier;
+        }
+
+        carriesSomething(){
+            return !!this.carries;
+        }
+
+        beingCarried(){
+            return !!this.carrier;
+        }
+    }
+
+    class Hole extends Thing{
+    }
+
+    class Leaf extends Thing{
     }
 
     class Agent extends Thing{
@@ -268,7 +417,8 @@
 
             this.state = {
                 status: INITIALIZED,
-                world: new WorldModel()
+                world: new WorldModel(),
+                carries: null
             };
 
             this.config = Object.assign({
@@ -301,7 +451,9 @@
                 this.updateStateStatus,
                 this.updateStatePosition,
                 this.removeFinishedActionFromActuator,
-                this.updateWorldModel
+                this.updateWorldModel,
+                this.updateCatchedObject,
+                this.updateDroppedObject
             ];
 
             const cloneState = this.cloneState(state);
@@ -347,8 +499,26 @@
             return state;
         }
 
+        updateCatchedObject(state, event){
+            if(event.typeIs(CATCH_EVENT))
+                state.carries = event.getData().object;
+
+            return state;
+        }
+
+        updateDroppedObject(state, event){
+            if(event.typeIs(DROP_EVENT) && event.getData().object === state.carries)
+                state.carries = null;
+
+            return state;
+        }
+
         deliberate(state){
             const chain = [
+                this.shouldDropLeaf,
+                this.shouldCatchLeaf,
+                this.shouldMoveTowardsHole,
+                this.shouldMoveTowardsLeaf,
                 this.shouldExploreWorld,
                 this.shouldVisitOldSquares
             ];
@@ -362,26 +532,69 @@
             return null;
         }
 
-        shouldExploreWorld(state){
-            const squares = state.world.getSquaresWithUnknowNeighbours();
-            const sortedSquares = squares.map(square => ({square, distance: this.distanceTo(state.position, square.getPosition())}))
-                .sort((a, b) => a.distance - b.distance)
-                .map(obj => obj.square);
+        shouldDropLeaf(state){
+            if(!(state.carries && state.carries instanceof Leaf))
+                return;
 
-            if(sortedSquares.length)
-                return this.actionTowards(state.position, sortedSquares[0].getPosition());
+            const squares = state.world.squaresContaining(Hole);
+            const closest = this.closestSquare(state.position, squares);
+            if(closest && this.distanceTo(state.position, closest.getPosition()) === 0)
+                return DROP_ACTION;
         }
 
-        shouldVisitOldSquares(state){
-            const squares = state.world.getSquaresForVisit();
-            if(squares.length){
-                const randomNumber = Math.floor(Math.random() * squares.length);
-                return this.actionTowards(state.position, squares[randomNumber].getPosition());
+        shouldCatchLeaf(state){
+            if(state.carries)
+                return;
+
+            const squares = state.world.squaresContaining(Leaf);
+            const closest = this.closestSquare(state.position, squares);
+            if(closest && this.distanceTo(state.position, closest.getPosition()) === 0)
+                return CATCH_ACTION;
+        }
+
+        shouldMoveTowardsHole(state){
+            let squares;
+            if(state.carries && state.carries instanceof Leaf && (squares = state.world.squaresContaining(Hole)).length){
+                const closest = this.closestSquare(state.position, squares);
+                if(closest)
+                    return this.actionTowards(state.position, closest.getPosition());
             }
         }
 
+        shouldMoveTowardsLeaf(state){
+            let squares;
+            if(state.carries === null && (squares = state.world.squaresContaining(Leaf)).length){
+                const closest = this.closestSquare(state.position, squares);
+                if(closest)
+                    return this.actionTowards(state.position, closest.getPosition());
+            }
+        }
+
+        shouldExploreWorld(state){
+            const squares = state.world.squaresWithUnknowNeighbours();
+            const closest = this.closestSquare(state.position, squares);
+            if(closest)
+                return this.actionTowards(state.position, closest.getPosition());
+        }
+
+        shouldVisitOldSquares(state){
+            const squares = state.world.squaresForVisit();
+            if(squares.length){
+                const index = randomNumber(squares.length);
+                return this.actionTowards(state.position, squares[index].getPosition());
+            }
+        }
+
+        closestSquare(position, squares){
+            const sortedSquares = squares.map(square => ({square, distance: this.distanceTo(position, square.getPosition())}))
+                .sort((a, b) => a.distance - b.distance)
+                .map(obj => obj.square);
+
+            return sortedSquares.length ? sortedSquares[0] : null;
+        }
+
         distanceTo(from, to){
-            const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index]));
+            const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0);
             return Math.sqrt(value);
         }
 
@@ -391,7 +604,7 @@
                 [DOWN_ACTION, UP_ACTION]
             ];
 
-            const axisDiff = actions.map(function(arr, index){
+            const axisDiff = actions.map((arr, index) => {
                 const axisFrom = from[index];
                 const axisTo = to[index];
                 return {
@@ -501,7 +714,7 @@
             return new WorldModel(index);
         }
 
-        getSquaresWithUnknowNeighbours(){
+        squaresWithUnknowNeighbours(){
             const additionMatrix = [
                 [0, -1],
                 [1, 0],
@@ -509,9 +722,8 @@
                 [-1, 0]
             ];
 
-            const index = this.index;
-            const values = Object.values(index);
-            const knowNeighboursIndex = values.reduce(function(carry, obj){
+            const values = Object.values(this.index);
+            const knowNeighboursIndex = values.reduce((carry, obj) => {
                 const squarePosition = obj.square.getPosition();
                 const squareKey = canonicalPosition(...squarePosition);
 
@@ -519,11 +731,11 @@
                     carry[squareKey] = 0;
                 carry[squareKey] += obj.square.getBlockedSideQuantity();
 
-                additionMatrix.forEach(function(arr){
+                additionMatrix.forEach(arr => {
                     const position = squarePosition.map((value, index) => value + arr[index]);
                     const key = canonicalPosition(...position);
 
-                    if(index[key]){
+                    if(this.index[key]){
                         if(!carry[key])
                             carry[key] = 0;
 
@@ -535,13 +747,13 @@
             }, {});
 
             return Object.keys(knowNeighboursIndex)
-                .map(key => ({knowNeighbours: knowNeighboursIndex[key], square: index[key]}))
+                .map(key => ({knowNeighbours: knowNeighboursIndex[key], square: this.index[key]}))
                 .filter(obj => obj.knowNeighbours < 4)
                 .sort((a, b) => a.knowNeighbours - b.knowNeighbours)
                 .map(obj => obj.square.square);
         }
 
-        getSquaresForVisit(){
+        squaresForVisit(){
             const squares = Object.values(this.index);
             const sortedSquares = squares.sort((a, b) => a.timestamp - b.timestamp);
 
@@ -552,6 +764,12 @@
             }
 
             return sortedSquares.map(obj => obj.square);
+        }
+
+        squaresContaining(objectClass){
+            const squares = Object.values(this.index);
+            return squares.filter(obj => obj.square.objects.some(object => object instanceof objectClass))
+                .map(obj => obj.square);
         }
    }
 
@@ -568,7 +786,10 @@
                 backgroundColor: '#947064',
                 backgroundStrokeColor: '#836053',
                 agentColor: '#CD511D',
-                unobservedColor: 'rgba(0, 0, 0, .5)'
+                leafColor: '#80FF00',
+                unobservedColor: 'rgba(0, 0, 0, .5)',
+                holeColor: '#444',
+                holeBorderColor: '#725042'
             }, config);
 
             if(this.config.unitSizePx === null)
@@ -580,16 +801,16 @@
         }
 
         draw(){
-            requestAnimationFrame(this.draw.bind(this));
-
-            this.context.save();
-
             this.drawBackground(this.environment);
             this.drawObjects(this.environment.getObjects());
             this.drawObservedArea(this.environment.agents());
+
+            requestAnimationFrame(() => this.draw());
         }
 
         drawBackground(environment){
+            this.context.save();
+
             const unitSizePx = this.config.unitSizePx;
             const width = environment.getWidth();
             const height = environment.getHeight();
@@ -599,11 +820,13 @@
             this.context.strokeStyle = this.config.backgroundStrokeColor;
             this.context.lineWidth = this.config.unitStrokePx;
 
-            this.iteratePositions(function(x, y){
+            this.iteratePositions((x, y) => {
                 const args = [...this.getPixelPosition(x, y), unitSizePx, unitSizePx];
                 this.context.fillRect(...args);
                 this.context.strokeRect(...args);
             });
+
+            this.context.restore();
         }
 
         iteratePositions(callback){
@@ -636,21 +859,47 @@
         drawObject(object){
             const position = object.getPosition();
             const pixelPosition = this.getPixelPosition(...position);
+
+            this.context.save();
             this.context.translate(...pixelPosition);
 
             this.drawSpecificObject(object);
 
+            this.context.resetTransform();
             this.context.restore();
         }
 
         drawSpecificObject(object){
             if(object instanceof Agent)
                 return this.drawAgent(object);
+
+            if(object instanceof Hole)
+                return this.drawHole(object);
+
+            if(object instanceof Leaf)
+                return this.drawLeaf(object);
         }
 
         drawAgent(agent){
-            const unitSize = this.config.unitSizePx;
-            this.drawCircle(unitSize / 2, unitSize / 2, unitSize * .25, this.config.agentColor);
+            const halfUnit = this.config.unitSizePx / 2;
+            this.drawCircle(halfUnit, halfUnit, halfUnit / 2, this.config.agentColor);
+        }
+
+        drawHole(hole){
+            const halfUnit = this.config.unitSizePx / 2;
+
+            this.context.beginPath();
+            this.context.arc(halfUnit, halfUnit, halfUnit / 1.8, 0, Math.PI * 2, true);
+            this.context.clip();
+
+            this.drawCircle(halfUnit, halfUnit, halfUnit / 1.8, this.config.holeBorderColor);
+            const deviation = 4;
+            this.drawCircle(halfUnit + deviation, halfUnit + deviation, halfUnit / 1.8, this.config.holeColor);
+        }
+
+        drawLeaf(leaf){
+            const halfUnit = this.config.unitSizePx / 2;
+            this.drawCircle(halfUnit, halfUnit, halfUnit / 2, this.config.leafColor);
         }
 
         drawCircle(x, y, radius, color){
@@ -661,6 +910,8 @@
         }
 
         drawObservedArea(agents){
+            this.context.save();
+
             const observedPositions = agents.reduce((carry, agent) => this.addObservedPositionsFromAgent(carry, agent), {});
 
             this.context.fillStyle = this.config.unobservedColor;
@@ -688,6 +939,8 @@
 
     const $ = {
         Environment,
+        Hole,
+        Leaf,
         Agent,
         Render
     };
