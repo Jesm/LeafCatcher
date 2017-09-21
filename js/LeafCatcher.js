@@ -787,6 +787,7 @@
                 backgroundStrokeColor: '#836053',
                 agentColor: '#CD511D',
                 leafColor: '#80FF00',
+                leafStemColor: '#60DD00',
                 unobservedColor: 'rgba(0, 0, 0, .5)',
                 holeColor: '#444',
                 holeBorderColor: '#725042'
@@ -863,6 +864,11 @@
             this.context.save();
             this.context.translate(...pixelPosition);
 
+            if(object.beingCarried()){
+                this.context.translate(this.config.unitSizePx * .66, 0);
+                this.context.scale(.33, .33);
+            }
+
             this.drawSpecificObject(object);
 
             this.context.resetTransform();
@@ -882,14 +888,37 @@
 
         drawAgent(agent){
             const halfUnit = this.config.unitSizePx / 2;
-            this.drawCircle(halfUnit, halfUnit, halfUnit / 2, this.config.agentColor);
+            const radius = halfUnit * .30;
+            const deviation = radius * Math.sqrt(2);
+
+            this.context.strokeStyle = this.config.agentColor;
+            const legSize = halfUnit * .66;
+            const degree = Math.PI / 180;
+            for(let len = 3; len--;){
+                this.context.save();
+
+                this.context.translate(halfUnit, halfUnit);
+                this.context.rotate(-degree * (len * 35 + 10));
+
+                this.context.beginPath();
+                this.context.moveTo(-legSize, 0);
+                this.context.lineTo(legSize, 0);
+                this.context.stroke();
+
+                this.context.restore();
+            }
+
+            for(let x = -1; x <= 1; x++){
+                const pos = halfUnit + deviation * x;
+                this.drawCircle(pos, pos, radius, this.config.agentColor);
+            }
         }
 
         drawHole(hole){
             const halfUnit = this.config.unitSizePx / 2;
 
             this.context.beginPath();
-            this.context.arc(halfUnit, halfUnit, halfUnit / 1.8, 0, Math.PI * 2, true);
+            this.context.arc(halfUnit, halfUnit, halfUnit / 1.8, 0, Math.PI * 2);
             this.context.clip();
 
             this.drawCircle(halfUnit, halfUnit, halfUnit / 1.8, this.config.holeBorderColor);
@@ -899,7 +928,28 @@
 
         drawLeaf(leaf){
             const halfUnit = this.config.unitSizePx / 2;
-            this.drawCircle(halfUnit, halfUnit, halfUnit / 2, this.config.leafColor);
+            const circleRadius = halfUnit / 2;
+            const leafHalfWidth = circleRadius * .8;
+            const leafHalfHeight = Math.sqrt(Math.pow(circleRadius, 2) - Math.pow(circleRadius - leafHalfWidth, 2));
+
+            for(let len = 2; len--;){
+                this.context.save();
+
+                this.context.beginPath();
+                this.context.rect(halfUnit - leafHalfWidth * len, halfUnit - leafHalfHeight, leafHalfWidth, leafHalfHeight * 2);
+                this.context.clip();
+
+                const x = (circleRadius - leafHalfWidth) * [-1, 1][len];
+                this.drawCircle(halfUnit + x, halfUnit, circleRadius, this.config.leafColor);
+
+                this.context.restore();
+            }
+
+            this.context.strokeStyle = this.config.leafStemColor;
+            this.context.beginPath();
+            this.context.moveTo(halfUnit, halfUnit - leafHalfHeight);
+            this.context.lineTo(halfUnit, halfUnit + leafHalfHeight * 1.4);
+            this.context.stroke();
         }
 
         drawCircle(x, y, radius, color){
