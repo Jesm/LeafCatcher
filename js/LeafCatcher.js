@@ -871,7 +871,6 @@
 
             this.drawSpecificObject(object);
 
-            this.context.resetTransform();
             this.context.restore();
         }
 
