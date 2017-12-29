@@ -1,0 +1,9 @@
+version: '3'
+services:
+  web:
+    image: node:9
+    user: node
+    working_dir: /usr/src/app
+    tty: true
+    volumes:
+      - .:/usr/src/app

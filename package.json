@@ -1,0 +1,25 @@
+{
+  "name": "leaf-catcher",
+  "version": "1.1.0",
+  "description": "Simple agent architecture made for college. The ant must catch all leaves and drop them in the anthill hole.",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "webpack",
+    "watch": "webpack --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jesm/LeafCatcher.git"
+  },
+  "author": "Jonathan Szablevski",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Jesm/LeafCatcher/issues"
+  },
+  "homepage": "https://github.com/Jesm/LeafCatcher#readme",
+  "dependencies": {},
+  "devDependencies": {
+    "webpack": "^3.10.0"
+  }
+}
