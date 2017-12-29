@@ -30,9 +30,9 @@
             environment.addAtRandom(hole);
             environment.execute();
 
-            const agent = new LeafCatcher.Agent();
-            environment.addAtRandom(agent);
-            agent.execute();
+            const ant = new LeafCatcher.Ant();
+            environment.addAtRandom(ant);
+            ant.execute();
 
             const canvas = doc.createElement('canvas');
             canvas.width = canvas.height = unitSizePx * unitOrder;

@@ -16,6 +16,9 @@
     const CATCH_ACTION = Symbol('catch_action');
     const DROP_ACTION = Symbol('drop_action');
 
+    const CARRY_GOAL = Symbol('carry_goal');
+    const GOTO_GOAL = Symbol('goto_goal');
+
     const INITIALIZED = Symbol('initialized');
     const OPERATING = Symbol('operating');
 
@@ -36,12 +39,12 @@
         }
 
         addAtRandom(object){
-            const position = this.getAvailableRandomPosition();
+            const position = this._getAvailableRandomPosition();
             if(position)
                 this.add(object, ...position);
         }
 
-        getAvailableRandomPosition(){
+        _getAvailableRandomPosition(){
             const positionsIndex = {};
             const width = this.getWidth();
             const height = this.getHeight();
@@ -65,21 +68,12 @@
 
         add(object, ...position){
             this.objects.push(object);
-            this.moveObject(object, ...position);
-        }
-
-        execute(){
-            this.intervalRef = setInterval(this.execCycle.bind(this), this.config.cycleDuration);
-            this.execCycle();
-        }
-
-        execCycle(){
-            this.progressActions();
+            this._moveObject(object, ...position);
         }
 
         getViewFor(agent){
             const positions = this.getViewPositionsFor(agent);
-            return this.getSquaresFor(positions);
+            return this._getSquaresFor(positions);
         }
 
         getViewPositionsFor(agent){
@@ -98,7 +92,7 @@
             return arr;
         }
 
-        getSquaresFor(positions){
+        _getSquaresFor(positions){
             const squares = positions.reduce((obj, [x, y]) => {
                 const key = canonicalPosition(x, y);
 
@@ -122,37 +116,46 @@
             return Object.values(squares);
         }
 
-        progressActions(){
-            this.agents().forEach(agent => this.progressAction(agent));
+        execute(){
+            this.intervalRef = setInterval(() => this._execCycle(), this.config.cycleDuration);
+            this._execCycle();
         }
 
-        progressAction(agent){
-            const action = agent.actuator.getAction();
+        _execCycle(){
+            this._progressActions();
+        }
+
+        _progressActions(){
+            this.agents().forEach(agent => this._progressAction(agent));
+        }
+
+        _progressAction(agent){
+            const action = agent.act();
             if(action === null)
                 return;
 
-            const success = this.executeAction(agent, action);
+            const success = this._executeAction(agent, action);
 
             const eventType = success ? (action.isComplete() ? ACTION_COMPLETE_EVENT : ACTION_PROGRESSED_EVENT) : ACTION_FAILED_EVENT;
             const event = new Event(this, eventType, action);
-            agent.sensor.send(event);
+            agent.perceive(event);
         }
 
-        executeAction(agent, action){
+        _executeAction(agent, action){
             if(action.isMovement())
-                return this.executeMovementAction(agent, action);
+                return this._executeMovementAction(agent, action);
 
             if(action.typeIs(CATCH_ACTION))
-                return this.executeCatchAction(agent, action);
+                return this._executeCatchAction(agent, action);
 
             if(action.typeIs(DROP_ACTION))
-                return this.executeDropAction(agent, action);
+                return this._executeDropAction(agent, action);
         }
 
-        executeMovementAction(agent, action){
-            const newPosition = this.getNewPositionFromActionType(action.getType(), agent.getPosition());
-            if(this.isInBound(...newPosition)){
-                this.moveObject(agent, ...newPosition);
+        _executeMovementAction(agent, action){
+            const newPosition = this._getNewPositionFromActionType(action.getType(), agent.getPosition());
+            if(this._isInBound(...newPosition)){
+                this._moveObject(agent, ...newPosition);
                 action.increaseProgress();
                 return true;
             }
@@ -160,18 +163,18 @@
             return false;
         }
 
-        executeCatchAction(agent, action){
+        _executeCatchAction(agent, action){
             if(agent.carriesSomething())
                 return false;
 
-            const objects = this.objectsInSamePosition(agent);
+            const objects = this._objectsInSamePosition(agent);
             const leaves = objects.filter(object => object instanceof Leaf)
                 .filter(object => !object.beingCarried());
 
             if(leaves.length){
                 action.increaseProgress();
                 if(action.isComplete())
-                    this.attachTo(leaves[0], agent);
+                    this._attachTo(leaves[0], agent);
 
                 return true;
             }
@@ -179,21 +182,21 @@
             return false;
         }
 
-        executeDropAction(agent, action){
+        _executeDropAction(agent, action){
             if(!agent.carriesSomething())
                 return false;
 
-            const objects = this.objectsInSamePosition(agent);
+            const objects = this._objectsInSamePosition(agent);
             const holes = objects.filter(object => object instanceof Hole);
 
             if(holes.length){
                 action.increaseProgress();
                 if(action.isComplete()){
                     const object = agent.getCarriedObject();
-                    this.dettachFrom(object, agent);
+                    this._dettachFrom(object, agent);
 
                     if(object instanceof Leaf)
-                        this.consumeLeaf(object);
+                        this._consumeLeaf(object);
                 }
 
                 return true;
@@ -202,7 +205,7 @@
             return false;
         }
 
-        getNewPositionFromActionType(type, positionArr){
+        _getNewPositionFromActionType(type, positionArr){
              const movements = {
                 [UP_ACTION]: [0, -1],
                 [DOWN_ACTION]: [0, 1],
@@ -215,52 +218,52 @@
             return newPosition;
         }
 
-        isInBound(...position){
+        _isInBound(...position){
             const limits = [this.getWidth(), this.getHeight()];
             return position.every((value, index) => value >= 0 && value < limits[index]);
         }
 
-        moveObject(object, ...position){
+        _moveObject(object, ...position){
             object.setPosition(...position);
 
             if(object instanceof Agent){
                 const data = {object, position};
                 const ev = new Event(this, MOVED_EVENT, data);
-                object.sensor.send(ev);
+                object.perceive(ev);
             }
 
             if(object.carriesSomething())
-                this.moveObject(object.getCarriedObject(), ...position);
+                this._moveObject(object.getCarriedObject(), ...position);
         }
 
-        objectsInSamePosition(object){
+        _objectsInSamePosition(object){
             const position = object.getPosition();
             const sameValue = (value, index) => value === position[index];
             return this.objects.filter(object => object.getPosition().every(sameValue))
                 .filter(obj => obj != object);
         }
 
-        attachTo(object, agent){
+        _attachTo(object, agent){
             object.setCarrierObject(agent);
             agent.setCarriedObject(object);
 
             if(agent instanceof Agent){
                 const event = new Event(this, CATCH_EVENT, {object});
-                agent.sensor.send(event);
+                agent.perceive(event);
             }
         }
 
-        dettachFrom(object, agent){
+        _dettachFrom(object, agent){
             object.setCarrierObject(null);
             agent.setCarriedObject(null);
 
             if(agent instanceof Agent){
                 const event = new Event(this, DROP_EVENT, {object});
-                agent.sensor.send(event);
+                agent.perceive(event);
             }
         }
 
-        consumeLeaf(leaf){
+        _consumeLeaf(leaf){
             const index = this.objects.indexOf(leaf);
             this.objects.splice(index, 1);
 
@@ -412,317 +415,346 @@
         constructor(config = {}){
             super();
 
-            this.sensor = new Sensor(this);
-            this.actuator = new Actuator(this);
-
-            this.state = {
-                status: INITIALIZED,
-                world: new WorldModel(),
-                carries: null
-            };
-
             this.config = Object.assign({
                 reasoningInterval: 200
             }, config);
+
+            this.state = this._getInitialState();
+            this.eventQueue = [];
+            this.currentActionSequence = [];
+            this.currentAction = null;
+
+            this.intervalRef = null;
+        }
+
+        _getInitialState(){
+            return {};
+        }
+
+        perceive(event){
+            this.eventQueue = [...this.eventQueue, event];
+        }
+
+        act(){
+            return this.currentAction;
         }
 
         execute(){
-            this.intervalRef = setInterval(this.reason.bind(this), this.config.reasoningInterval);
+            this.intervalRef = setInterval(() => this._reason(), this.config.reasoningInterval);
         }
 
-        reason(){
-            const eventQueue = this.getEventQueue();
-            this.state = this.updateStateFromEvents(this.state, eventQueue);
-            const actionType = this.deliberate(this.state);
-            this.act(actionType);
-        }
+        _reason(){
+            this._beforeReasoning();
 
-        getEventQueue(){
-            this.sensor.captureView();
-            return this.sensor.extractEventQueue();
-        }
+            const percepts = this.eventQueue;
+            this.eventQueue = [];
+            this.state = this._updateState(this.state, percepts);
 
-        updateStateFromEvents(state, eventQueue){
-            return eventQueue.reduce((state, ev) => this.handleEvent(state, ev), state);
-        }
-
-        handleEvent(state, ev){
-            const chain = [
-                this.updateStateStatus,
-                this.updateStatePosition,
-                this.removeFinishedActionFromActuator,
-                this.updateWorldModel,
-                this.updateCatchedObject,
-                this.updateDroppedObject
-            ];
-
-            const cloneState = this.cloneState(state);
-            return chain.reduce((newState, fun) => fun.call(this, newState, ev), cloneState);
-        }
-
-        cloneState(state){
-            const newState = Object.assign({}, state);
-            newState.world = state.world.clone();
-
-            return newState;
-        }
-
-        updateStateStatus(state, ev){
-            if(ev.typeIs(MOVED_EVENT) && state.status === INITIALIZED){
-                state.status = OPERATING;
-                const environment = ev.getSender();
-                this.sensor.setEnvironment(environment);
-                this.actuator.setEnvironment(environment);
+            if(this.currentAction){
+                if(this.currentAction.isComplete())
+                    this.currentAction = null;
+                else
+                    return;
             }
 
-            return state;
+            if(this.currentActionSequence.length === 0){
+                const goal = this._formulateGoal(this.state);
+                const problem = goal && this._formulateProblem(this.state, goal);
+                const sequence = problem && this._search(problem);
+                if(sequence)
+                    this.currentActionSequence = sequence;
+            }
+
+            if(this.currentActionSequence.length > 0){
+                const actionType = this.currentActionSequence.shift();
+                this.currentAction = new Action(actionType);
+            }
         }
 
-        updateStatePosition(state, ev){
-            if(ev.typeIs(MOVED_EVENT))
-                state.position = ev.getData().position;
+        _beforeReasoning(){}
 
-            return state;
+        _updateState(state, events){
+            const reducers = this._getStateReducers();
+            return events.reduce((state, event) => {
+                return reducers.reduce((state, reducer) => reducer.call(this, state, event), state);
+            }, state);
         }
 
-        removeFinishedActionFromActuator(state, ev){
-            if(ev.typeIs(ACTION_COMPLETE_EVENT, ACTION_FAILED_EVENT) && ev.getData() === this.actuator.getAction())
-                this.actuator.clearAction();
-
-            return state;
+        _getStateReducers(){
+            return [];
         }
 
-        updateWorldModel(state, ev){
-            if(ev.typeIs(CAPTURED_VIEW_EVENT))
-                state.world.applyView(ev.getData());
-
-            return state;
-        }
-
-        updateCatchedObject(state, event){
-            if(event.typeIs(CATCH_EVENT))
-                state.carries = event.getData().object;
-
-            return state;
-        }
-
-        updateDroppedObject(state, event){
-            if(event.typeIs(DROP_EVENT) && event.getData().object === state.carries)
-                state.carries = null;
-
-            return state;
-        }
-
-        deliberate(state){
-            const chain = [
-                this.shouldDropLeaf,
-                this.shouldCatchLeaf,
-                this.shouldMoveTowardsHole,
-                this.shouldMoveTowardsLeaf,
-                this.shouldExploreWorld,
-                this.shouldVisitOldSquares
-            ];
-
+        _formulateGoal(state){
+            const chain = this._getGoalEvaluationChain();
             for(let fun of chain){
-                const actionType = fun.call(this, state);
-                if(actionType)
-                    return actionType;
+                const goal = fun.call(this, state);
+                if(goal)
+                    return goal;
             }
 
             return null;
         }
 
-        shouldDropLeaf(state){
-            if(!(state.carries && state.carries instanceof Leaf))
-                return;
-
-            const squares = state.world.squaresContaining(Hole);
-            const closest = this.closestSquare(state.position, squares);
-            if(closest && this.distanceTo(state.position, closest.getPosition()) === 0)
-                return DROP_ACTION;
+        _getGoalEvaluationChain(){
+            return [];
         }
 
-        shouldCatchLeaf(state){
-            if(state.carries)
-                return;
-
-            const squares = state.world.squaresContaining(Leaf);
-            const closest = this.closestSquare(state.position, squares);
-            if(closest && this.distanceTo(state.position, closest.getPosition()) === 0)
-                return CATCH_ACTION;
+        _formulateProblem(state, goal){
+            return null;
         }
 
-        shouldMoveTowardsHole(state){
-            let squares;
-            if(state.carries && state.carries instanceof Leaf && (squares = state.world.squaresContaining(Hole)).length){
-                const closest = this.closestSquare(state.position, squares);
-                if(closest)
-                    return this.actionTowards(state.position, closest.getPosition());
+        _search(problem){
+            problem = Object.assign({
+                canonicalForm: JSON.stringify
+            }, problem);
+
+            const { initialState, canonicalForm, pathCost, heuristic } = problem;
+            const makeNode = this._nodeMakerFactory(canonicalForm, heuristic);
+
+            const frontier = { index: {}, queue: [] };
+            const explored = {};
+            this._addToFrontier(frontier, makeNode(initialState));
+
+            for(let node; node = this._popFromFrontier(frontier);){
+                if(problem.goalTest(node.state))
+                    return node.sequence;
+
+                explored[node.hash] = true;
+
+                problem.actions(node.state).forEach(action => {
+                    const state = problem.result(node.state, action);
+                    const cost = pathCost(node.state, action, state);
+                    const child = makeNode(state, node.cost + cost, [...node.sequence, action]);
+
+                    if(!explored[child.hash])
+                        this._addToFrontier(frontier, child);
+                });
             }
+
+            return null;
         }
 
-        shouldMoveTowardsLeaf(state){
-            let squares;
-            if(state.carries === null && (squares = state.world.squaresContaining(Leaf)).length){
-                const closest = this.closestSquare(state.position, squares);
-                if(closest)
-                    return this.actionTowards(state.position, closest.getPosition());
-            }
-        }
-
-        shouldExploreWorld(state){
-            const squares = state.world.squaresWithUnknowNeighbours();
-            const closest = this.closestSquare(state.position, squares);
-            if(closest)
-                return this.actionTowards(state.position, closest.getPosition());
-        }
-
-        shouldVisitOldSquares(state){
-            const squares = state.world.squaresForVisit();
-            if(squares.length){
-                const index = randomNumber(squares.length);
-                return this.actionTowards(state.position, squares[index].getPosition());
-            }
-        }
-
-        closestSquare(position, squares){
-            const sortedSquares = squares.map(square => ({square, distance: this.distanceTo(position, square.getPosition())}))
-                .sort((a, b) => a.distance - b.distance)
-                .map(obj => obj.square);
-
-            return sortedSquares.length ? sortedSquares[0] : null;
-        }
-
-        distanceTo(from, to){
-            const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0);
-            return Math.sqrt(value);
-        }
-
-        actionTowards(from, to){
-            const actions = [
-                [RIGHT_ACTION, LEFT_ACTION],
-                [DOWN_ACTION, UP_ACTION]
-            ];
-
-            const axisDiff = actions.map((arr, index) => {
-                const axisFrom = from[index];
-                const axisTo = to[index];
+        _nodeMakerFactory(canonicalForm, heuristic){
+            return (state, cost = 0, sequence = []) => {
                 return {
-                    diff: Math.abs(axisFrom - axisTo),
-                    action: arr[axisFrom < axisTo ? 0 : 1]
+                    state,
+                    hash: canonicalForm(state),
+                    cost,
+                    estimate: cost + heuristic(state),
+                    sequence
                 };
-            });
-
-            const sortedAxisDiff = axisDiff.filter(obj => obj.diff > 0)
-                .sort((a, b) => b.diff - a.diff);
-
-            return sortedAxisDiff.length ? sortedAxisDiff[0].action : null;
-        }
-
-        act(actionType){
-            this.actuator.setAction(actionType);
-        }
-    }
-
-    class AgentComponent{
-        constructor(agent){
-            this.agent = agent;
-            this.environment = null;
-        }
-
-        setEnvironment(environment){
-            this.environment = environment;
-        }
-    }
-
-
-    class Sensor extends AgentComponent{
-        constructor(agent){
-            super(agent);
-
-            this.eventQueue = [];
-        }
-
-        send(ev){
-            this.eventQueue.push(ev);
-        }
-
-        captureView(){
-            if(!this.environment)
-                return;
-
-            const view = this.environment.getViewFor(this.agent);
-            const ev = new Event(this, CAPTURED_VIEW_EVENT, view);
-            this.send(ev);
-        }
-
-        extractEventQueue(){
-            const queue = this.eventQueue;
-            this.eventQueue = [];
-            return queue;
-        }
-    }
-
-    class Actuator extends AgentComponent{
-        constructor(agent){
-            super(agent);
-
-            this.currentAction = null;
-        }
-
-        getAction(){
-            return this.currentAction;
-        }
-
-        clearAction(){
-            this.currentAction = null;
-        }
-
-        setAction(type){
-            if(this.currentAction === null || !this.currentAction.typeIs(type))
-                this.currentAction = new Action(type);
-        }
-
-        progressAction(){
-            if(!this.currentAction)
-                return;
-
-            const action = this.action;
-            this.environment.progressAction(action);
-        }
-    }
-
-    class WorldModel{
-        constructor(index = {}){
-            this.index = index;
-        }
-
-        applyView(view){
-            view.forEach(square => this.applySquare(square));
-        }
-
-        applySquare(square){
-            const key = canonicalPosition(...square.getPosition());
-            this.index[key] = {
-                square,
-                timestamp: Date.now()
             };
         }
 
-        clone(){
-            const index = Object.assign({}, this.index);
-            return new WorldModel(index);
+        _addToFrontier(frontier, node){
+            const index = frontier.index[node.hash];
+            if(index != null){
+                if(frontier.queue[index].cost > node.cost){
+                    frontier.queue.splice(index, 1);
+                    for(; index < frontier.queue.length; index++)
+                        frontier.index[frontier.queue[index].hash] = index;
+                }
+                else
+                    return;
+            }
+
+            let idx = 0;
+            while(idx < frontier.queue.length && frontier.queue[idx].estimate <= node.estimate)
+                idx++;
+
+            frontier.index[node.hash] = idx;
+            if(idx === frontier.queue.length)
+                frontier.queue = [...frontier.queue, node];
+            else
+                frontier.queue.splice(idx, 0, node);
+
+            for(idx++; idx < frontier.queue.length; idx++)
+                frontier.index[frontier.queue[idx].hash] = idx;
         }
 
-        squaresWithUnknowNeighbours(){
-            const additionMatrix = [
-                [0, -1],
-                [1, 0],
-                [0, 1],
-                [-1, 0]
-            ];
+        _popFromFrontier(frontier){
+            if(!frontier.queue.length)
+                return null;
 
-            const values = Object.values(this.index);
+            const [node, ...tail] = frontier.queue;
+            delete frontier.index[node.hash];
+            frontier.queue = tail;
+
+            for(let len = frontier.queue.length; len--;)
+                frontier.index[frontier.queue[len].hash] = len;
+
+            return node;
+        }
+    }
+
+    class Ant extends Agent{
+        constructor(){
+            super();
+
+            this.actionMovementIndex = {
+                [UP_ACTION]: [0, -1],
+                [RIGHT_ACTION]: [1, 0],
+                [DOWN_ACTION]: [0, 1],
+                [LEFT_ACTION]: [-1, 0]
+            };
+        }
+
+        _getInitialState(){
+            return {
+                status: INITIALIZED,
+                world: {},
+                carries: null
+            }
+        }
+
+        _beforeReasoning(){
+            if(!this.state.environment)
+                return;
+
+            const view = this.state.environment.getViewFor(this);
+            const event = new Event(this, CAPTURED_VIEW_EVENT, view);
+            this.perceive(event);
+        }
+
+        _getStateReducers(){
+            return [
+                this._setStateEnvironment,
+                this._updateStatePosition,
+                this._clearCurrentSequenceIfActionFailed,
+                this._updateWorldModel,
+                this._updateCarriedObject,
+                this._updateDroppedObject
+            ];
+        }
+
+        _setStateEnvironment(state, event){
+            if(event.typeIs(MOVED_EVENT) && state.status === INITIALIZED){
+                return Object.assign({}, state, {
+                    status: OPERATING,
+                    environment: event.getSender()
+                });
+            }
+
+            return state;
+        }
+
+        _updateStatePosition(state, event){
+            if(event.typeIs(MOVED_EVENT)){
+                const { position } = event.getData();
+                return Object.assign({}, state, { position });
+            }
+
+            return state;
+        }
+
+        _clearCurrentSequenceIfActionFailed(state, event){
+            if(event.typeIs(ACTION_FAILED_EVENT) && event.getData() === this.currentAction){
+                this.currentActionSequence = [];
+                this.currentAction = null;
+            }
+
+            return state;
+        }
+
+        _updateWorldModel(state, event){
+            if(event.typeIs(CAPTURED_VIEW_EVENT)){
+                const view = event.getData();
+                const index = view.reduce((carry, square) => {
+                    const key = canonicalPosition(...square.getPosition());
+                    carry[key] = { square, timestamp: Date.now() };
+                    return carry;
+                }, {});
+
+                const world = Object.assign({}, state.world, index);
+                return Object.assign({}, state, { world });
+            }
+
+            return state;
+        }
+
+        _updateCarriedObject(state, event){
+            if(event.typeIs(CATCH_EVENT))
+                return Object.assign({}, state, { carries: event.getData().object });
+
+            return state;
+        }
+
+        _updateDroppedObject(state, event){
+            if(event.typeIs(DROP_EVENT) && event.getData().object === state.carries)
+                return Object.assign({}, state, { carries: null });
+
+            return state;
+        }
+
+        _getGoalEvaluationChain(){
+            return [
+                this._shouldDropLeaf,
+                this._shouldCatchLeaf,
+                this._shouldMoveTowardsHole,
+                this._shouldMoveTowardsLeaf,
+                this._shouldExploreWorld,
+                this._shouldVisitOldSquares
+            ];
+        }
+
+        _shouldDropLeaf(state){
+            if(!(state.carries && state.carries instanceof Leaf))
+                return;
+
+            const squares = this._squaresContaining(state.world, Hole);
+            const closest = this._closestSquare(state.position, squares);
+            if(closest && this._distanceTo(state.position, closest.getPosition()) === 0)
+                return { type: CARRY_GOAL, carry: false };
+        }
+
+        _shouldCatchLeaf(state){
+            if(state.carries)
+                return;
+
+            const squares = this._squaresContaining(state.world, Leaf);
+            const closest = this._closestSquare(state.position, squares);
+            if(closest && this._distanceTo(state.position, closest.getPosition()) === 0)
+                return { type: CARRY_GOAL, carry: true };
+        }
+
+        _shouldMoveTowardsHole(state){
+            let squares;
+            if(state.carries && state.carries instanceof Leaf && (squares = this._squaresContaining(state.world, Hole)).length){
+                const closest = this._closestSquare(state.position, squares);
+                if(closest)
+                    return { type: GOTO_GOAL, position: closest.getPosition() };
+            }
+        }
+
+        _shouldMoveTowardsLeaf(state){
+            let squares;
+            if(state.carries === null && (squares = this._squaresContaining(state.world, Leaf)).length){
+                const closest = this._closestSquare(state.position, squares);
+                if(closest)
+                    return { type: GOTO_GOAL, position: closest.getPosition() };
+            }
+        }
+
+        _shouldExploreWorld(state){
+            const squares = this._squaresWithUnknowNeighbours(state.world);
+            const closest = this._closestSquare(state.position, squares);
+            if(closest)
+                return { type: GOTO_GOAL, position: closest.getPosition() };
+        }
+
+        _shouldVisitOldSquares(state){
+            const squares = this._squaresForVisit(state.world);
+            if(squares.length){
+                const index = randomNumber(squares.length);
+                return { type: GOTO_GOAL, position: squares[index].getPosition() };
+            }
+        }
+
+        _squaresWithUnknowNeighbours(world){
+            const additionMatrix = Object.getOwnPropertySymbols(this.actionMovementIndex)
+                .map(sym => this.actionMovementIndex[sym]);
+
+            const values = Object.values(world);
             const knowNeighboursIndex = values.reduce((carry, obj) => {
                 const squarePosition = obj.square.getPosition();
                 const squareKey = canonicalPosition(...squarePosition);
@@ -735,7 +767,7 @@
                     const position = squarePosition.map((value, index) => value + arr[index]);
                     const key = canonicalPosition(...position);
 
-                    if(this.index[key]){
+                    if(world[key]){
                         if(!carry[key])
                             carry[key] = 0;
 
@@ -747,14 +779,14 @@
             }, {});
 
             return Object.keys(knowNeighboursIndex)
-                .map(key => ({knowNeighbours: knowNeighboursIndex[key], square: this.index[key]}))
+                .map(key => ({ knowNeighbours: knowNeighboursIndex[key], square: world[key] }))
                 .filter(obj => obj.knowNeighbours < 4)
                 .sort((a, b) => a.knowNeighbours - b.knowNeighbours)
                 .map(obj => obj.square.square);
         }
 
-        squaresForVisit(){
-            const squares = Object.values(this.index);
+        _squaresForVisit(world){
+            const squares = Object.values(world);
             const sortedSquares = squares.sort((a, b) => a.timestamp - b.timestamp);
 
             if(sortedSquares.length){
@@ -766,12 +798,103 @@
             return sortedSquares.map(obj => obj.square);
         }
 
-        squaresContaining(objectClass){
-            const squares = Object.values(this.index);
+        _squaresContaining(world, objectClass){
+            const squares = Object.values(world);
             return squares.filter(obj => obj.square.objects.some(object => object instanceof objectClass))
                 .map(obj => obj.square);
         }
-   }
+
+        _closestSquare(position, squares){
+            const sortedSquares = squares.map(square => ({square, distance: this._distanceTo(position, square.getPosition())}))
+                .sort((a, b) => a.distance - b.distance)
+                .map(obj => obj.square);
+
+            return sortedSquares.length ? sortedSquares[0] : null;
+        }
+
+        _distanceTo(from, to){
+            const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0);
+            return Math.sqrt(value);
+        }
+
+        _formulateProblem(state, goal){
+            switch(goal.type){
+                case CARRY_GOAL:
+                    return this._generateCarryProblem(state, goal.carry);
+                case GOTO_GOAL:
+                    return this._generateGotoProblem(state, goal.position);
+                default:
+                    return null;
+            }
+        }
+
+        _generateCarryProblem(state, carry){
+            const initialState = !!state.carries;
+
+            const result = (bool, action) => {
+                switch(action){
+                    case CATCH_ACTION:
+                        return true;
+                    case DROP_ACTION:
+                        return false;
+                }
+            };
+
+            const pathCost = (from, action, to) => {
+                switch(action){
+                    case CATCH_ACTION:
+                        return 3;
+                    case DROP_ACTION:
+                        return 2;
+                }
+            };
+
+            const actions = bool => [bool ? DROP_ACTION : CATCH_ACTION];
+            const goalTest = bool => bool === carry;
+            const heuristic = bool => bool === carry ? 0 : 1;
+
+            return {
+                initialState,
+                actions,
+                result,
+                goalTest,
+                pathCost,
+                heuristic
+            };
+        }
+
+        _generateGotoProblem(state, position){
+            const initialState = state.position;
+
+            const result = (pos, action) => {
+                const addArr = this.actionMovementIndex[action];
+                return pos.map((num, index) => num + addArr[index]);
+            };
+
+            const actions = pos => {
+                const actions = Object.getOwnPropertySymbols(this.actionMovementIndex);
+                return actions.filter(action => {
+                    const position = result(pos, action);
+                    return !!state.world[canonicalForm(position)];
+                });
+            };
+
+            const goalTest = pos => pos.every((num, index) => num === position[index]);
+            const pathCost = (from, action, to) => 1;
+            const heuristic = pos => this._distanceTo(pos, position);
+            const canonicalForm = pos => canonicalPosition(...pos);
+
+            return {
+                initialState,
+                actions,
+                result,
+                goalTest,
+                pathCost,
+                heuristic,
+                canonicalForm
+            };
+        }
+    }
 
     class Render{
         constructor(environment, element, config = {}){
@@ -990,7 +1113,7 @@
         Environment,
         Hole,
         Leaf,
-        Agent,
+        Ant,
         Render
     };
 
