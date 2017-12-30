@@ -5,12 +5,14 @@ import Leaf from './Leaf.js';
 import Render from './Render.js';
 
 (doc => {
-    const unitSizePx = 60;
+    const unitSizePx = 40;
     const unitOrder = 8;
+    const viewRadius = 2;
 
     const environment = new Environment({
         width: unitOrder,
-        height: unitOrder
+        height: unitOrder,
+        viewRadius
     });
     const hole = new Hole();
     environment.addAtRandom(hole);

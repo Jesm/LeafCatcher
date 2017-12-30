@@ -1,6 +1,6 @@
 import search from './search/aStar';
-import { typeIs, ACTION_FAILED } from './events';
-import { isComplete, factory as makeAction } from './actions';
+import { typeIs, ACTION_FAILED, ACTION_COMPLETE } from './events';
+import { factory as makeAction } from './actions';
 import Thing from './Thing.js';
 
 export default class Agent extends Thing {
@@ -9,7 +9,8 @@ export default class Agent extends Thing {
 
         this.state = this._getInitialState();
         this.eventQueue = [];
-        this.currentActionSequence = [];
+        this.currentGoal = null;
+        this.currentSequence = [];
         this.currentAction = null;
 
         this.intervalRef = null;
@@ -43,41 +44,50 @@ export default class Agent extends Thing {
         this.eventQueue = [];
         this.state = this._updateState(this.state, percepts);
 
-        if(this.currentAction){
-            if(isComplete(this.currentAction))
-                this.currentAction = null;
-            else
-                return;
-        }
-
-        if(this.currentActionSequence.length === 0){
-            const goal = this._formulateGoal(this.state);
-            const problem = goal && this._formulateProblem(this.state, goal);
+        // If we have a better goal to pursue than the current one
+        const goalIndex = this.currentGoal ? this.currentGoal.index : null;
+        const goal = this._formulateGoal(this.state, goalIndex);
+        if(goal !== null){
+            const problem = this._formulateProblem(this.state, goal);
             const sequence = problem && search(problem);
-            if(sequence)
-                this.currentActionSequence = sequence;
+            if(sequence){
+                this.currentGoal = goal;
+                this.currentSequence = sequence;
+                this.currentAction = null;
+            }
         }
 
-        if(this.currentActionSequence.length > 0){
-            const actionType = this.currentActionSequence.shift();
-            this.currentAction = makeAction(actionType);
+        if(this.currentAction === null && this.currentSequence.length > 0){
+            const [type, ...tail] = this.currentSequence;
+            this.currentSequence = tail;
+            this.currentAction = makeAction(type);
         }
     }
 
     _beforeReasoning(){}
 
     _updateState(state, events){
-        const reducers = [this._clearCurrentSequenceIfActionFailed, ...this._getStateReducers()];
+        const reducers = [this._verifyCurrentActionStatus, ...this._getStateReducers()];
 
         return events.reduce((state, event) => {
             return reducers.reduce((state, reducer) => reducer.call(this, state, event), state);
         }, state);
     }
 
-    _clearCurrentSequenceIfActionFailed(state, event){
-        if(typeIs(event, ACTION_FAILED) && event.data === this.currentAction){
-            this.currentActionSequence = [];
-            this.currentAction = null;
+    _verifyCurrentActionStatus(state, event){
+        if(event.data === this.currentAction){
+            switch(event.type){
+                case ACTION_FAILED:
+                    this.currentGoal = null;
+                    this.currentSequence = [];
+                    this.currentAction = null;
+                break;
+                case ACTION_COMPLETE:
+                    this.currentAction = null;
+                    if(this.currentSequence.length === 0)
+                        this.currentGoal = null;
+                break;
+            }
         }
 
         return state;
@@ -87,12 +97,18 @@ export default class Agent extends Thing {
         return [];
     }
 
-    _formulateGoal(state){
+    _formulateGoal(state, maxIndex = null){
+        let index = 0;
         const chain = this._getGoalEvaluationChain();
         for(let fun of chain){
+            if(maxIndex !== null && index >= maxIndex)
+                return null;
+
             const goal = fun.call(this, state);
             if(goal)
-                return goal;
+                return Object.assign({ index }, goal);
+
+            index++;
         }
 
         return null;

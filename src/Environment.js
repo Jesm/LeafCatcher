@@ -32,10 +32,10 @@ const makePositionsIndex = (width, height) => {
 export default class Environment {
     constructor(args = {}){
         this.config = Object.assign({
-            width: 30,
-            height: 30,
+            width: 32,
+            height: 32,
             cycleDuration: 400,
-            viewRadius: 2
+            viewRadius: 8
         }, args);
 
         this.positions = makePositionsIndex(this.width(), this.height());
