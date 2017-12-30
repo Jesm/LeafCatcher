@@ -1,22 +1,18 @@
-import { CAPTURED_VIEW, MOVED, CATCH, DROP, ACTION_FAILED } from './events';
-import { CARRY, GOTO } from './goals';
-import { UP, DOWN, LEFT, RIGHT, CATCH as CATCH_ACTION, DROP as DROP_ACTION, cost } from './actions';
-import { randomNumber, canonicalPosition } from './utils';
+import { CAPTURED_VIEW, MOVED, CATCH, DROP, factory as makeEvent, typeIs } from './events';
+import { CARRY, GOTO, factory as makeGoal } from './goals';
+import * as actions from './actions';
+import { positionString, randomNumber } from './utils';
 import Agent from './Agent.js';
 import Leaf from './Leaf.js';
 import Hole from './Hole.js';
-import Event from './Event.js';
 
-const actionMovementIndex = {
-    [UP]: [0, -1],
-    [RIGHT]: [1, 0],
-    [DOWN]: [0, 1],
-    [LEFT]: [-1, 0]
-};
+const containsObj = (square, objectClass) => square.objects.some(obj => obj instanceof objectClass);
 
 export default class Ant extends Agent {
     _getInitialState(){
         return {
+            environment: null,
+            position: null,
             world: {},
             carries: null
         }
@@ -27,52 +23,42 @@ export default class Ant extends Agent {
             return;
 
         const view = this.state.environment.getViewFor(this);
-        const event = new Event(this, CAPTURED_VIEW, view);
+        const event = makeEvent(CAPTURED_VIEW, this, view);
         this.perceive(event);
     }
 
     _getStateReducers(){
         return [
-            this._setStateEnvironment,
-            this._updateStatePosition,
-            this._clearCurrentSequenceIfActionFailed,
-            this._updateWorldModel,
+            this._updateEnvironment,
+            this._updatePosition,
+            this._updateWorld,
             this._updateCarriedObject,
             this._updateDroppedObject
         ];
     }
 
-    _setStateEnvironment(state, event){
-        if(event.typeIs(MOVED) && !state.environment)
-            return Object.assign({}, state, { environment: event.getSender() });
+    _updateEnvironment(state, event){
+        if(typeIs(event, MOVED) && state.environment === null)
+            return Object.assign({}, state, { environment: event.sender });
 
         return state;
     }
 
-    _updateStatePosition(state, event){
-        if(event.typeIs(MOVED)){
-            const { position } = event.getData();
+    _updatePosition(state, event){
+        if(typeIs(event, MOVED)){
+            const { position } = event.data;
             return Object.assign({}, state, { position });
         }
 
         return state;
     }
 
-    _clearCurrentSequenceIfActionFailed(state, event){
-        if(event.typeIs(ACTION_FAILED) && event.getData() === this.currentAction){
-            this.currentActionSequence = [];
-            this.currentAction = null;
-        }
-
-        return state;
-    }
-
-    _updateWorldModel(state, event){
-        if(event.typeIs(CAPTURED_VIEW)){
-            const view = event.getData();
+    _updateWorld(state, event){
+        if(typeIs(event, CAPTURED_VIEW)){
+            const view = event.data;
+            const timestamp = Date.now();
             const index = view.reduce((carry, square) => {
-                const key = canonicalPosition(...square.getPosition());
-                carry[key] = { square, timestamp: Date.now() };
+                carry[square.key] = Object.assign({ timestamp }, square);
                 return carry;
             }, {});
 
@@ -84,14 +70,14 @@ export default class Ant extends Agent {
     }
 
     _updateCarriedObject(state, event){
-        if(event.typeIs(CATCH))
-            return Object.assign({}, state, { carries: event.getData().object });
+        if(typeIs(event, CATCH))
+            return Object.assign({}, state, { carries: event.data.object });
 
         return state;
     }
 
     _updateDroppedObject(state, event){
-        if(event.typeIs(DROP) && event.getData().object === state.carries)
+        if(typeIs(event, DROP) && event.data.object === state.carries)
             return Object.assign({}, state, { carries: null });
 
         return state;
@@ -112,28 +98,26 @@ export default class Ant extends Agent {
         if(!(state.carries && state.carries instanceof Leaf))
             return;
 
-        const squares = this._squaresContaining(state.world, Hole);
-        const closest = this._closestSquare(state.position, squares);
-        if(closest && this._distanceTo(state.position, closest.getPosition()) === 0)
-            return { type: CARRY, carry: false };
+        const square = state.world[positionString(...state.position)];
+        if(square && containsObj(square, Hole))
+            return makeGoal(CARRY, { carry: false });
     }
 
     _shouldCatchLeaf(state){
         if(state.carries)
             return;
 
-        const squares = this._squaresContaining(state.world, Leaf);
-        const closest = this._closestSquare(state.position, squares);
-        if(closest && this._distanceTo(state.position, closest.getPosition()) === 0)
-            return { type: CARRY, carry: true };
+        const square = state.world[positionString(...state.position)];
+        if(square && containsObj(square, Leaf))
+            return makeGoal(CARRY, { carry: true });
     }
 
     _shouldMoveTowardsHole(state){
         let squares;
-        if(state.carries && state.carries instanceof Leaf && (squares = this._squaresContaining(state.world, Hole)).length){
+        if(state.carries && (squares = this._squaresContaining(state.world, Hole)).length){
             const closest = this._closestSquare(state.position, squares);
             if(closest)
-                return { type: GOTO, position: closest.getPosition() };
+                return makeGoal(GOTO, { position: closest.value });
         }
     }
 
@@ -142,7 +126,7 @@ export default class Ant extends Agent {
         if(state.carries === null && (squares = this._squaresContaining(state.world, Leaf)).length){
             const closest = this._closestSquare(state.position, squares);
             if(closest)
-                return { type: GOTO, position: closest.getPosition() };
+                return makeGoal(GOTO, { position: closest.value });
         }
     }
 
@@ -150,33 +134,29 @@ export default class Ant extends Agent {
         const squares = this._squaresWithUnknowNeighbours(state.world);
         const closest = this._closestSquare(state.position, squares);
         if(closest)
-            return { type: GOTO, position: closest.getPosition() };
+            return makeGoal(GOTO, { position: closest.value });
     }
 
     _shouldVisitOldSquares(state){
         const squares = this._squaresForVisit(state.world);
         if(squares.length){
             const index = randomNumber(squares.length);
-            return { type: GOTO, position: squares[index].getPosition() };
+            return makeGoal(GOTO, { position: squares[index].value });
         }
     }
 
     _squaresWithUnknowNeighbours(world){
-        const additionMatrix = Object.getOwnPropertySymbols(actionMovementIndex)
-            .map(sym => actionMovementIndex[sym]);
-
         const values = Object.values(world);
-        const knowNeighboursIndex = values.reduce((carry, obj) => {
-            const squarePosition = obj.square.getPosition();
-            const squareKey = canonicalPosition(...squarePosition);
+        const knowNeighboursIndex = values.reduce((carry, square) => {
+            if(!carry[square.key])
+                carry[square.key] = 0;
 
-            if(!carry[squareKey])
-                carry[squareKey] = 0;
-            carry[squareKey] += obj.square.getBlockedSideQuantity();
+            carry[square.key] += square.blockedSides;
 
-            additionMatrix.forEach(arr => {
-                const position = squarePosition.map((value, index) => value + arr[index]);
-                const key = canonicalPosition(...position);
+            const { UP, DOWN, LEFT, RIGHT, applyActionToPosition } = actions;
+            [UP, DOWN, LEFT, RIGHT].forEach(action => {
+                const position = applyActionToPosition(action, square.value);
+                const key = positionString(...position);
 
                 if(world[key]){
                     if(!carry[key])
@@ -190,10 +170,10 @@ export default class Ant extends Agent {
         }, {});
 
         return Object.keys(knowNeighboursIndex)
-            .map(key => ({ knowNeighbours: knowNeighboursIndex[key], square: world[key] }))
-            .filter(obj => obj.knowNeighbours < 4)
-            .sort((a, b) => a.knowNeighbours - b.knowNeighbours)
-            .map(obj => obj.square.square);
+            .map(key => ({ cmp: knowNeighboursIndex[key], square: world[key] }))
+            .filter(obj => obj.cmp < 4)
+            .sort((a, b) => a.cmp - b.cmp)
+            .map(obj => obj.square);
     }
 
     _squaresForVisit(world){
@@ -202,21 +182,18 @@ export default class Ant extends Agent {
 
         if(sortedSquares.length){
             const limit = sortedSquares[0].timestamp;
-            const oldestSquares = sortedSquares.filter(obj => obj.timestamp === limit);
-            return oldestSquares.map(obj => obj.square);
+            return sortedSquares.filter(obj => obj.timestamp === limit);
         }
 
-        return sortedSquares.map(obj => obj.square);
+        return [];
     }
 
     _squaresContaining(world, objectClass){
-        const squares = Object.values(world);
-        return squares.filter(obj => obj.square.objects.some(object => object instanceof objectClass))
-            .map(obj => obj.square);
+        return Object.values(world).filter(square => containsObj(square, objectClass));
     }
 
     _closestSquare(position, squares){
-        const sortedSquares = squares.map(square => ({square, distance: this._distanceTo(position, square.getPosition())}))
+        const sortedSquares = squares.map(square => ({ square, distance: this._distanceTo(position, square.value) }))
             .sort((a, b) => a.distance - b.distance)
             .map(obj => obj.square);
 
@@ -240,25 +217,26 @@ export default class Ant extends Agent {
     }
 
     _generateCarryProblem(state, carry){
-        const initialState = !!state.carries;
+        const { CATCH, DROP, cost } = actions;
 
         const result = (bool, action) => {
             switch(action){
-                case CATCH_ACTION:
+                case CATCH:
                     return true;
-                case DROP_ACTION:
+                case DROP:
                     return false;
             }
         };
 
-        const actions = bool => [bool ? DROP_ACTION : CATCH_ACTION];
+        const initialState = !!state.carries;
+        const problemActions = bool => [bool ? DROP : CATCH];
         const goalTest = bool => bool === carry;
         const pathCost = (from, action, to) => cost(action);
         const heuristic = bool => bool === carry ? 0 : 1;
 
         return {
             initialState,
-            actions,
+            actions: problemActions,
             result,
             goalTest,
             pathCost,
@@ -267,34 +245,30 @@ export default class Ant extends Agent {
     }
 
     _generateGotoProblem(state, position){
-        const initialState = state.position;
+        const { UP, DOWN, LEFT, RIGHT, cost, applyActionToPosition } = actions;
 
-        const result = (pos, action) => {
-            const addArr = actionMovementIndex[action];
-            return pos.map((num, index) => num + addArr[index]);
-        };
-
-        const actions = pos => {
-            const actions = Object.getOwnPropertySymbols(actionMovementIndex);
-            return actions.filter(action => {
+        const problemActions = pos => {
+            return [UP, DOWN, LEFT, RIGHT].filter(action => {
                 const position = result(pos, action);
-                return !!state.world[canonicalForm(position)];
+                return !!state.world[canonical(position)];
             });
         };
 
+        const result = (pos, action) => applyActionToPosition(action, pos);
+        const initialState = state.position;
         const goalTest = pos => pos.every((num, index) => num === position[index]);
         const pathCost = (from, action, to) => cost(action);
         const heuristic = pos => this._distanceTo(pos, position);
-        const canonicalForm = pos => canonicalPosition(...pos);
+        const canonical = pos => positionString(...pos);
 
         return {
             initialState,
-            actions,
+            actions: problemActions,
             result,
             goalTest,
             pathCost,
             heuristic,
-            canonicalForm
+            canonical
         };
     }
 }

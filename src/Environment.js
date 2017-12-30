@@ -1,23 +1,63 @@
-import { canonicalPosition, randomNumber } from './utils';
-import { ACTION_COMPLETE, ACTION_PROGRESSED, ACTION_FAILED, MOVED, CATCH, DROP } from './events';
-import { UP, DOWN, LEFT, RIGHT, CATCH as CATCH_ACTION, DROP as DROP_ACTION } from './actions';
-import Square from './Square.js';
-import Event from './Event.js';
+import { positionString, randomNumber } from './utils';
+import * as events from './events';
+import * as actions from './actions';
+import Agent from './Agent.js';
 import Leaf from './Leaf.js';
 import Hole from './Hole.js';
-import Agent from './Agent.js';
+
+const makePositionsIndex = (width, height) => {
+    const index = {};
+    for(let len = width * height; len--;){
+        const x = len % width;
+        const y = Math.floor(len / width);
+
+        let blockedSides = 0;
+        if(x === 0 || x === width - 1)
+            blockedSides++;
+        if(y === 0 || y === height - 1)
+            blockedSides++;
+
+        const key = positionString(x, y);
+        index[key] = {
+            key,
+            blockedSides,
+            value: [x, y],
+            objects: []
+        };
+    }
+
+    return index;
+};
 
 export default class Environment {
-    constructor(config = {}){
-        this.objects = [];
-        this.leaves = [];
-
+    constructor(args = {}){
         this.config = Object.assign({
             width: 30,
             height: 30,
             cycleDuration: 400,
             viewRadius: 2
-        }, config);
+        }, args);
+
+        this.positions = makePositionsIndex(this.width(), this.height());
+        this.leaves = [];
+    }
+
+    width(){
+        return this.config.width;
+    }
+
+    height(){
+        return this.config.height;
+    }
+
+    objects(){
+        return Object.values(this.positions)
+            .filter(pos => pos.objects.length > 0)
+            .reduce((carry, pos) => [...carry, ...pos.objects], []);
+    }
+
+    agents(){
+        return this.objects().filter(obj => obj instanceof Agent);
     }
 
     addAtRandom(object){
@@ -27,46 +67,34 @@ export default class Environment {
     }
 
     _getAvailableRandomPosition(){
-        const positionsIndex = {};
-        const width = this.getWidth();
-        const height = this.getHeight();
+        const positions = Object.values(this.positions)
+            .filter(pos => pos.objects.length === 0)
+            .map(pos => pos.value);
 
-        for(let len = width * height; len--;){
-            const x = len % width;
-            const y = Math.floor(len / width);
-            const key = canonicalPosition(x, y);
-            positionsIndex[key] = [x, y];
-        }
-
-        this.objects.forEach(object => {
-            const position = object.getPosition();
-            const key = canonicalPosition(...position);
-            delete positionsIndex[key];
-        });
-
-        const positions = Object.values(positionsIndex);
         return positions.length ? positions[randomNumber(positions.length)] : null;
     }
 
     add(object, ...position){
-        this.objects.push(object);
         this._moveObject(object, ...position);
     }
 
     getViewFor(agent){
-        const positions = this.getViewPositionsFor(agent);
-        return this._getSquaresFor(positions);
+        return this.getViewPositionsFor(agent)
+            .map(pos => this.positions[positionString(...pos)]);
     }
 
     getViewPositionsFor(agent){
         const arr = [];
-        const radius = this.config.viewRadius;
+        const width = this.width();
+        const height = this.height();
+        const { viewRadius: radius } = this.config;
         const [agentX, agentY] = agent.getPosition();
-        const toX = Math.min(agentX + radius + 1, this.config.width);
+        const toX = Math.min(agentX + radius + 1, width);
+
         for(let x = Math.max(agentX - radius, 0); x < toX; x++){
             const valueY = Math.sqrt(Math.pow(radius, 2) - Math.pow(x - agentX, 2));
             const roundedY = Math.floor(valueY);
-            const toY = Math.min(agentY + roundedY + 1, this.config.height);
+            const toY = Math.min(agentY + roundedY + 1, height);
             for(let y = Math.max(agentY - roundedY, 0); y < toY; y++)
                 arr.push([x, y]);
         }
@@ -74,36 +102,12 @@ export default class Environment {
         return arr;
     }
 
-    _getSquaresFor(positions){
-        const squares = positions.reduce((obj, [x, y]) => {
-            const key = canonicalPosition(x, y);
-
-            let blockedSideQuantity = 0;
-            if(x === 0 || x === this.getWidth() - 1)
-                blockedSideQuantity++;
-
-            if(y === 0 || y === this.getHeight() - 1)
-                blockedSideQuantity++;
-
-            obj[key] = new Square(x, y, blockedSideQuantity);
-            return obj;
-        }, {});
-
-        this.objects.forEach(object => {
-            const key = canonicalPosition(...object.getPosition());
-            if(squares[key])
-                squares[key].add(object);
-        });
-
-        return Object.values(squares);
-    }
-
     up(){
-        this.intervalRef = setInterval(() => this._execCycle(), this.config.cycleDuration);
-        this._execCycle();
+        this.intervalRef = setInterval(() => this._cycle(), this.config.cycleDuration);
+        this._cycle();
     }
 
-    _execCycle(){
+    _cycle(){
         this._progressActions();
     }
 
@@ -118,27 +122,30 @@ export default class Environment {
 
         const success = this._executeAction(agent, action);
 
-        const eventType = success ? (action.isComplete() ? ACTION_COMPLETE : ACTION_PROGRESSED) : ACTION_FAILED;
-        const event = new Event(this, eventType, action);
+        const { ACTION_FAILED, ACTION_PROGRESSED, ACTION_COMPLETE } = events;
+        const eventType = success ? (actions.isComplete(action) ? ACTION_COMPLETE : ACTION_PROGRESSED) : ACTION_FAILED;
+        const event = events.factory(eventType, this, action);
         agent.perceive(event);
     }
 
     _executeAction(agent, action){
         switch(true){
-            case action.isMovement():
-                return this._executeMovementAction(agent, action);
-            case action.typeIs(CATCH_ACTION):
+            case actions.isMovement(action):
+                return this._executeDisplacementAction(agent, action);
+            case actions.typeIs(action, actions.CATCH):
                 return this._executeCatchAction(agent, action);
-            case action.typeIs(DROP_ACTION):
+            case actions.typeIs(action, actions.DROP):
                 return this._executeDropAction(agent, action);
         }
     }
 
-    _executeMovementAction(agent, action){
-        const newPosition = this._getNewPositionFromActionType(action.getType(), agent.getPosition());
+    _executeDisplacementAction(agent, action){
+        const position = agent.getPosition();
+        const newPosition = actions.applyActionToPosition(action.type, position);
+
         if(this._isInBound(...newPosition)){
             this._moveObject(agent, ...newPosition);
-            action.increaseProgress();
+            actions.increaseProgress(action);
             return true;
         }
 
@@ -149,13 +156,13 @@ export default class Environment {
         if(agent.carriesSomething())
             return false;
 
-        const objects = this._objectsInSamePosition(agent);
-        const leaves = objects.filter(object => object instanceof Leaf)
+        const leaves = this._objectsInSamePosition(agent)
+            .filter(object => object instanceof Leaf)
             .filter(object => !object.beingCarried());
 
         if(leaves.length){
-            action.increaseProgress();
-            if(action.isComplete())
+            actions.increaseProgress(action);
+            if(actions.isComplete(action))
                 this._attachTo(leaves[0], agent);
 
             return true;
@@ -168,12 +175,12 @@ export default class Environment {
         if(!agent.carriesSomething())
             return false;
 
-        const objects = this._objectsInSamePosition(agent);
-        const holes = objects.filter(object => object instanceof Hole);
+        const holes = this._objectsInSamePosition(agent)
+            .filter(object => object instanceof Hole);
 
         if(holes.length){
-            action.increaseProgress();
-            if(action.isComplete()){
+            actions.increaseProgress(action);
+            if(actions.isComplete(action)){
                 const object = agent.getCarriedObject();
                 this._dettachFrom(object, agent);
 
@@ -187,42 +194,47 @@ export default class Environment {
         return false;
     }
 
-    _getNewPositionFromActionType(type, positionArr){
-         const movements = {
-            [UP]: [0, -1],
-            [DOWN]: [0, 1],
-            [RIGHT]: [1, 0],
-            [LEFT]: [-1, 0]
-        };
-        const add = movements[type];
-        const newPosition = positionArr.map((value, index) => value + add[index]);
-
-        return newPosition;
-    }
-
     _isInBound(...position){
-        const limits = [this.getWidth(), this.getHeight()];
+        const limits = [this.width(), this.height()];
         return position.every((value, index) => value >= 0 && value < limits[index]);
     }
 
+    _objectsInSamePosition(object){
+        const position = object.getPosition();
+        const key = positionString(...position);
+        return this.positions[key].objects.filter(obj => obj != object);
+    }
+
     _moveObject(object, ...position){
+        const currentPosition = object.getPosition();
+        if(currentPosition != null)
+            this._removeFromPosition(object, ...currentPosition);
+
+        this._addToPosition(object, ...position);
         object.setPosition(...position);
 
         if(object instanceof Agent){
-            const data = {object, position};
-            const ev = new Event(this, MOVED, data);
-            object.perceive(ev);
+            const event = events.factory(events.MOVED, this, { object, position });
+            object.perceive(event);
         }
 
         if(object.carriesSomething())
             this._moveObject(object.getCarriedObject(), ...position);
     }
 
-    _objectsInSamePosition(object){
-        const position = object.getPosition();
-        const sameValue = (value, index) => value === position[index];
-        return this.objects.filter(object => object.getPosition().every(sameValue))
-            .filter(obj => obj != object);
+    _removeFromPosition(object, ...position){
+        this._alterPositionObjects(position, objs => objs.filter(obj => obj != object));
+    }
+
+    _addToPosition(object, ...position){
+        this._alterPositionObjects(position, objs => [...objs, object]);
+    }
+
+    _alterPositionObjects(position, callback){
+        const key = positionString(...position);
+        const obj = this.positions[key];
+        const objects = callback(obj.objects);
+        this.positions[key] = Object.assign({}, obj, { objects });
     }
 
     _attachTo(object, agent){
@@ -230,7 +242,7 @@ export default class Environment {
         agent.setCarriedObject(object);
 
         if(agent instanceof Agent){
-            const event = new Event(this, CATCH, {object});
+            const event = events.factory(events.CATCH, this, { object });
             agent.perceive(event);
         }
     }
@@ -240,31 +252,13 @@ export default class Environment {
         agent.setCarriedObject(null);
 
         if(agent instanceof Agent){
-            const event = new Event(this, DROP, {object});
+            const event = events.factory(events.DROP, this, { object });
             agent.perceive(event);
         }
     }
 
     _consumeLeaf(leaf){
-        const index = this.objects.indexOf(leaf);
-        this.objects.splice(index, 1);
-
-        this.leaves.push(leaf);
-    }
-
-    getObjects(){
-        return this.objects.slice();
-    }
-
-    agents(){
-        return this.objects.filter(obj => obj instanceof Agent);
-    }
-
-    getWidth(){
-        return this.config.width;
-    }
-
-    getHeight(){
-        return this.config.height;
+        this._removeFromPosition(leaf, ...leaf.getPosition());
+        this.leaves = [...this.leaves, leaf];
     }
 }

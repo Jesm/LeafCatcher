@@ -1,10 +1,10 @@
 export default args => {
     const problem = Object.assign({
-        canonicalForm: JSON.stringify
+        canonical: JSON.stringify
     }, args);
 
-    const { initialState, canonicalForm, pathCost, heuristic } = problem;
-    const makeNode = nodeMakerFactory(canonicalForm, heuristic);
+    const { initialState, canonical, pathCost, heuristic } = problem;
+    const makeNode = nodeMakerFactory(canonical, heuristic);
 
     const frontier = makeFrontier();
     const explored = {};
@@ -31,11 +31,11 @@ export default args => {
 
 const makeFrontier = () => ({ index: {}, queue: [] });
 
-const nodeMakerFactory = (canonicalForm, heuristic) => {
+const nodeMakerFactory = (canonical, heuristic) => {
     return (state, cost = 0, sequence = []) => {
         return {
             state,
-            hash: canonicalForm(state),
+            hash: canonical(state),
             cost,
             estimate: cost + heuristic(state),
             sequence

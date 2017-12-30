@@ -1,5 +1,6 @@
 export default class Thing {
     constructor(){
+        this.position = null;
         this.carries = null;
         this.carrier = null;
     }
@@ -8,8 +9,8 @@ export default class Thing {
         return this.position;
     }
 
-    setPosition(x, y){
-        this.position = [x, y];
+    setPosition(...arr){
+        this.position = arr;
     }
 
     setCarriedObject(object){

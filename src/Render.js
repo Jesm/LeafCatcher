@@ -1,4 +1,4 @@
-import { canonicalPosition } from './utils';
+import { positionString } from './utils';
 import Ant from './Ant.js';
 import Hole from './Hole.js';
 import Leaf from './Leaf.js';
@@ -25,7 +25,7 @@ export default class Render {
         }, config);
 
         if(this.config.unitSizePx === null)
-            this.config.unitSizePx = this.htmlElement.width / this.environment.getWidth();
+            this.config.unitSizePx = this.htmlElement.width / this.environment.width();
     }
 
     up(){
@@ -38,7 +38,7 @@ export default class Render {
 
     _draw(){
         this._drawBackground(this.environment);
-        this._drawObjects(this.environment.getObjects());
+        this._drawObjects(this.environment.objects());
         this._drawObservedArea(this.environment.agents());
     }
 
@@ -46,8 +46,8 @@ export default class Render {
         this.context.save();
 
         const unitSizePx = this.config.unitSizePx;
-        const width = environment.getWidth();
-        const height = environment.getHeight();
+        const width = environment.width();
+        const height = environment.height();
         this.context.clearRect(0, 0, width * unitSizePx, height * unitSizePx);
 
         this.context.fillStyle = this.config.backgroundColor;
@@ -64,8 +64,8 @@ export default class Render {
     }
 
     _iteratePositions(callback){
-        const width = this.environment.getWidth();
-        const height = this.environment.getHeight();
+        const width = this.environment.width();
+        const height = this.environment.height();
         for(let x = 0; x < width; x++){
             for(let y = 0; y < height; y++)
                 callback.call(this, x, y);
@@ -206,13 +206,13 @@ export default class Render {
 
     _addObservedPositionsFromAgent(obj, agent){
         const positions = this.environment.getViewPositionsFor(agent);
-        positions.forEach(arr => obj[canonicalPosition(...arr)] = true);
+        positions.forEach(arr => obj[positionString(...arr)] = true);
 
         return obj;
     }
 
     _drawUnobservedSquares(observedPositions, x, y){
-        const key = canonicalPosition(x, y);
+        const key = positionString(x, y);
         if(observedPositions[key])
             return;
 

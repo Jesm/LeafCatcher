@@ -1,6 +1,7 @@
-import search from './search/aStar.js';
+import search from './search/aStar';
+import { typeIs, ACTION_FAILED } from './events';
+import { isComplete, factory as makeAction } from './actions';
 import Thing from './Thing.js';
-import Action from './Action.js';
 
 export default class Agent extends Thing {
     constructor(config = {}){
@@ -43,7 +44,7 @@ export default class Agent extends Thing {
         this.state = this._updateState(this.state, percepts);
 
         if(this.currentAction){
-            if(this.currentAction.isComplete())
+            if(isComplete(this.currentAction))
                 this.currentAction = null;
             else
                 return;
@@ -59,17 +60,27 @@ export default class Agent extends Thing {
 
         if(this.currentActionSequence.length > 0){
             const actionType = this.currentActionSequence.shift();
-            this.currentAction = new Action(actionType);
+            this.currentAction = makeAction(actionType);
         }
     }
 
     _beforeReasoning(){}
 
     _updateState(state, events){
-        const reducers = this._getStateReducers();
+        const reducers = [this._clearCurrentSequenceIfActionFailed, ...this._getStateReducers()];
+
         return events.reduce((state, event) => {
             return reducers.reduce((state, reducer) => reducer.call(this, state, event), state);
         }, state);
+    }
+
+    _clearCurrentSequenceIfActionFailed(state, event){
+        if(typeIs(event, ACTION_FAILED) && event.data === this.currentAction){
+            this.currentActionSequence = [];
+            this.currentAction = null;
+        }
+
+        return state;
     }
 
     _getStateReducers(){
