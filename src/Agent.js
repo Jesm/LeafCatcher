@@ -16,7 +16,7 @@ export default class Agent extends Thing {
         this.intervalRef = null;
 
         this.config = Object.assign({
-            reasoningInterval: 200
+            reasoningInterval: 100
         }, config);
     }
 

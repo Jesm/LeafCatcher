@@ -7,9 +7,14 @@ export default class Render {
     constructor(environment, element, config = {}){
         this.environment = environment;
 
-        this.htmlElement = element;
-        this.context = this.htmlElement.getContext('2d');
+        this.canvas = element;
+        this.context = this.canvas.getContext('2d');
         this.animationFrameReq = null;
+
+        this.canvas.addEventListener('mousemove', event => this._handleMouseMove(event));
+        this.canvas.addEventListener('click', event => this._handleClick(event));
+        this.positionSelectionCallbacks = [];
+        this.mousePosition = null;
 
         this.config = Object.assign({
             unitSizePx: null,
@@ -21,11 +26,12 @@ export default class Render {
             leafStemColor: '#60DD00',
             unobservedColor: 'rgba(0, 0, 0, .5)',
             holeColor: '#444',
-            holeBorderColor: '#725042'
+            holeBorderColor: '#725042',
+            highlightColor: 'rgba(255, 255, 255, .5)',
         }, config);
 
         if(this.config.unitSizePx === null)
-            this.config.unitSizePx = this.htmlElement.width / this.environment.width();
+            this.config.unitSizePx = this.canvas.width / this.environment.width();
     }
 
     up(){
@@ -40,6 +46,7 @@ export default class Render {
         this._drawBackground(this.environment);
         this._drawObjects(this.environment.objects());
         this._drawObservedArea(this.environment.agents());
+        this._drawMouseHighlight();
     }
 
     _drawBackground(environment){
@@ -86,6 +93,8 @@ export default class Render {
     _getZIndexFor(object){
         switch(true){
             case object instanceof Ant:
+                return 2;
+            case object instanceof Leaf:
                 return 1;
             default:
                 return 0;
@@ -219,4 +228,42 @@ export default class Render {
         const pixels = this._getPixelPosition(x, y);
         this.context.fillRect(...pixels, this.config.unitSizePx, this.config.unitSizePx);
    }
+
+    _drawMouseHighlight(){
+        if(this.mousePosition === null || this.positionSelectionCallbacks.length === 0)
+            return;
+
+        this.context.save();
+
+        const position = this._getHighlightPosition();
+        const pixels = this._getPixelPosition(...position);
+        this.context.fillStyle = this.config.highlightColor;
+        this.context.fillRect(...pixels, this.config.unitSizePx, this.config.unitSizePx);
+
+        this.context.restore();
+    }
+
+    _getHighlightPosition(){
+        if(this.mousePosition === null)
+            return null;
+
+        const { x, y } = this.canvas.getClientRects()[0];
+        const offsets = [x, y];
+        return this.mousePosition.map((num, index) => Math.floor((num - offsets[index]) / this.config.unitSizePx));
+    }
+
+    nextPositionSelection(callback){
+        this.positionSelectionCallbacks = [...this.positionSelectionCallbacks, callback];
+    }
+
+    _handleMouseMove(event){
+        this.mousePosition = [event.clientX, event.clientY];
+    }
+
+    _handleClick(event){
+        const highlight = this._getHighlightPosition();
+        const callbacks = this.positionSelectionCallbacks;
+        this.positionSelectionCallbacks = [];
+        callbacks.forEach(callback => callback(...highlight));
+    }
 }

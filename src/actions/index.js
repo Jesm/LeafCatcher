@@ -4,17 +4,18 @@ export const DOWN = Symbol('down');
 export const LEFT = Symbol('left');
 export const CATCH = Symbol('catch');
 export const DROP = Symbol('drop');
+export const OBSERVE = Symbol('observe');
 
-export const cost = action => {
-    switch(action){
-    case UP: case RIGHT: case DOWN: case LEFT:
-        return 1;
-    case DROP:
-        return 2;
-    case CATCH:
-        return 3;
-    }
-}
+const costs = {
+    [UP]: 1,
+    [DOWN]: 1,
+    [LEFT]: 1,
+    [RIGHT]: 1,
+    [OBSERVE]: 1,
+    [DROP]: 2,
+    [CATCH]: 3
+};
+export const cost = type => costs[type];
 
 const positionTransformations = {
     [UP]: [0, -1],

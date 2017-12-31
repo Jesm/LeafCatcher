@@ -1,0 +1,20 @@
+* {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    text-align: center;
+}
+
+canvas {
+    display: inline-block;
+    margin-top: 50px;
+}
+
+ul {
+    list-style: none;
+}
+ul li {
+    display: inline-block;
+}

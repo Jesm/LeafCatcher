@@ -1,4 +1,4 @@
-import { CAPTURED_VIEW, MOVED, CATCH, DROP, factory as makeEvent, typeIs } from './events';
+import { VIEW, DISPLACEMENT, CATCH, DROP, factory as makeEvent, typeIs } from './events';
 import { CARRY, GOTO, factory as makeGoal } from './goals';
 import * as actions from './actions';
 import { positionString, randomNumber } from './utils';
@@ -7,6 +7,7 @@ import Leaf from './Leaf.js';
 import Hole from './Hole.js';
 
 const containsObj = (square, objectClass) => square.objects.some(obj => obj instanceof objectClass);
+const distance = (from, to) => Math.sqrt(from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0));
 
 export default class Ant extends Agent {
     _getInitialState(){
@@ -19,12 +20,11 @@ export default class Ant extends Agent {
     }
 
     _beforeReasoning(){
-        if(!this.state.environment)
+        if(this.state.environment === null)
             return;
 
-        const view = this.state.environment.getViewFor(this);
-        const event = makeEvent(CAPTURED_VIEW, this, view);
-        this.perceive(event);
+        const action = actions.factory(actions.OBSERVE);
+        this.state.environment.executeAgentPassiveAction(this, action);
     }
 
     _getStateReducers(){
@@ -38,14 +38,14 @@ export default class Ant extends Agent {
     }
 
     _updateEnvironment(state, event){
-        if(typeIs(event, MOVED) && state.environment === null)
+        if(typeIs(event, DISPLACEMENT) && state.environment === null)
             return Object.assign({}, state, { environment: event.sender });
 
         return state;
     }
 
     _updatePosition(state, event){
-        if(typeIs(event, MOVED)){
+        if(typeIs(event, DISPLACEMENT)){
             const { position } = event.data;
             return Object.assign({}, state, { position });
         }
@@ -54,7 +54,7 @@ export default class Ant extends Agent {
     }
 
     _updateWorld(state, event){
-        if(typeIs(event, CAPTURED_VIEW)){
+        if(typeIs(event, VIEW)){
             const view = event.data;
             const timestamp = Date.now();
             const index = view.reduce((carry, square) => {
@@ -85,8 +85,8 @@ export default class Ant extends Agent {
 
     _getGoalEvaluationChain(){
         return [
-            this._shouldDropLeaf,
-            this._shouldCatchLeaf,
+            this._shouldDrop,
+            this._shouldCatch,
             this._shouldMoveTowardsHole,
             this._shouldMoveTowardsLeaf,
             this._shouldExploreWorld,
@@ -94,8 +94,8 @@ export default class Ant extends Agent {
         ];
     }
 
-    _shouldDropLeaf(state){
-        if(!(state.carries && state.carries instanceof Leaf))
+    _shouldDrop(state){
+        if(!state.carries)
             return;
 
         const square = state.world[positionString(...state.position)];
@@ -103,7 +103,7 @@ export default class Ant extends Agent {
             return makeGoal(CARRY, { carry: false });
     }
 
-    _shouldCatchLeaf(state){
+    _shouldCatch(state){
         if(state.carries)
             return;
 
@@ -113,21 +113,36 @@ export default class Ant extends Agent {
     }
 
     _shouldMoveTowardsHole(state){
-        let squares;
-        if(state.carries && (squares = this._squaresContaining(state.world, Hole)).length){
-            const closest = this._closestSquare(state.position, squares);
-            if(closest)
-                return makeGoal(GOTO, { position: closest.value });
-        }
+        if(!state.carries)
+            return;
+
+        const squares = this._squaresContaining(state.world, Hole);
+        const closest = this._closestSquare(state.position, squares);
+        if(closest)
+            return makeGoal(GOTO, { position: closest.value });
     }
 
     _shouldMoveTowardsLeaf(state){
-        let squares;
-        if(state.carries === null && (squares = this._squaresContaining(state.world, Leaf)).length){
-            const closest = this._closestSquare(state.position, squares);
-            if(closest)
-                return makeGoal(GOTO, { position: closest.value });
-        }
+        if(state.carries)
+            return;
+
+        const squares = this._squaresContaining(state.world, Leaf)
+            .filter(square => !containsObj(square, Ant));
+        const closest = this._closestSquare(state.position, squares);
+        if(closest)
+            return makeGoal(GOTO, { position: closest.value });
+    }
+
+    _squaresContaining(world, objectClass){
+        return Object.values(world).filter(square => containsObj(square, objectClass));
+    }
+
+    _closestSquare(position, squares){
+        const sortedSquares = squares.map(square => ({ square, distance: distance(position, square.value) }))
+            .sort((a, b) => a.distance - b.distance)
+            .map(obj => obj.square);
+
+        return sortedSquares.length ? sortedSquares[0] : null;
     }
 
     _shouldExploreWorld(state){
@@ -135,14 +150,6 @@ export default class Ant extends Agent {
         const closest = this._closestSquare(state.position, squares);
         if(closest)
             return makeGoal(GOTO, { position: closest.value });
-    }
-
-    _shouldVisitOldSquares(state){
-        const squares = this._squaresForVisit(state.world);
-        if(squares.length){
-            const index = randomNumber(squares.length);
-            return makeGoal(GOTO, { position: squares[index].value });
-        }
     }
 
     _squaresWithUnknowNeighbours(world){
@@ -176,33 +183,15 @@ export default class Ant extends Agent {
             .map(obj => obj.square);
     }
 
-    _squaresForVisit(world){
-        const squares = Object.values(world);
-        const sortedSquares = squares.sort((a, b) => a.timestamp - b.timestamp);
+    _shouldVisitOldSquares(state){
+        const squares = Object.values(state.world)
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(0, 10);
 
-        if(sortedSquares.length){
-            const limit = sortedSquares[0].timestamp;
-            return sortedSquares.filter(obj => obj.timestamp === limit);
+        if(squares.length){
+            const index = randomNumber(squares.length);
+            return makeGoal(GOTO, { position: squares[index].value });
         }
-
-        return [];
-    }
-
-    _squaresContaining(world, objectClass){
-        return Object.values(world).filter(square => containsObj(square, objectClass));
-    }
-
-    _closestSquare(position, squares){
-        const sortedSquares = squares.map(square => ({ square, distance: this._distanceTo(position, square.value) }))
-            .sort((a, b) => a.distance - b.distance)
-            .map(obj => obj.square);
-
-        return sortedSquares.length ? sortedSquares[0] : null;
-    }
-
-    _distanceTo(from, to){
-        const value = from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0);
-        return Math.sqrt(value);
     }
 
     _formulateProblem(state, goal){
@@ -250,7 +239,8 @@ export default class Ant extends Agent {
         const problemActions = pos => {
             return [UP, DOWN, LEFT, RIGHT].filter(action => {
                 const position = result(pos, action);
-                return !!state.world[canonical(position)];
+                const square = state.world[canonical(position)];
+                return !!(square && !containsObj(square, Ant));
             });
         };
 
@@ -258,7 +248,7 @@ export default class Ant extends Agent {
         const initialState = state.position;
         const goalTest = pos => pos.every((num, index) => num === position[index]);
         const pathCost = (from, action, to) => cost(action);
-        const heuristic = pos => this._distanceTo(pos, position);
+        const heuristic = pos => distance(pos, position);
         const canonical = pos => positionString(...pos);
 
         return {
