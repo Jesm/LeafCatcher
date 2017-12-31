@@ -3,6 +3,7 @@ import Agent from '../Agent.js';
 import Ant from '../Ant.js';
 import Leaf from '../Leaf.js';
 import Hole from '../Hole.js';
+import Rock from '../Rock.js';
 
 export const OBSERVE = Symbol('observe');
 export const MOVE_TO = Symbol('move_to');
@@ -13,7 +14,8 @@ const rules = [
     { objectClass: Thing, operations: {
         [MOVE_TO]: [
             (object, square) => square != null,
-            (object, square) => square.objects.every(obj => obj.constructor !== object.constructor)
+            (object, square) => square.objects.every(obj => obj.constructor !== object.constructor),
+            (object, square) => !square.objects.some(obj => obj instanceof Rock)
         ],
         [CATCH]: [
             (object, obj) => obj != null,
@@ -33,6 +35,11 @@ const rules = [
     { objectClass: Ant, operations: {
         [CATCH]: [
             (object, obj) => obj instanceof Leaf
+        ]
+    }},
+    { objectClass: Rock, operations: {
+        [MOVE_TO]: [
+            (object, square) => square.objects.length === 0
         ]
     }}
 ];

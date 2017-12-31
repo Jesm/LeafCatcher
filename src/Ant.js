@@ -5,8 +5,9 @@ import { positionString, randomNumber } from './utils';
 import Agent from './Agent.js';
 import Leaf from './Leaf.js';
 import Hole from './Hole.js';
+import Rock from './Rock.js';
 
-const containsObj = (square, objectClass) => square.objects.some(obj => obj instanceof objectClass);
+const containsSome = (square, ...classes) => square.objects.some(obj => classes.some(objClass => obj instanceof objClass));
 const distance = (from, to) => Math.sqrt(from.reduce((sum, value, index) => sum + Math.pow(value - to[index], 2), 0));
 
 export default class Ant extends Agent {
@@ -99,7 +100,7 @@ export default class Ant extends Agent {
             return;
 
         const square = state.world[positionString(...state.position)];
-        if(square && containsObj(square, Hole))
+        if(square && containsSome(square, Hole))
             return makeGoal(CARRY, { carry: false });
     }
 
@@ -108,7 +109,7 @@ export default class Ant extends Agent {
             return;
 
         const square = state.world[positionString(...state.position)];
-        if(square && containsObj(square, Leaf))
+        if(square && containsSome(square, Leaf))
             return makeGoal(CARRY, { carry: true });
     }
 
@@ -127,14 +128,14 @@ export default class Ant extends Agent {
             return;
 
         const squares = this._squaresContaining(state.world, Leaf)
-            .filter(square => !containsObj(square, Ant));
+            .filter(square => !containsSome(square, Ant));
         const closest = this._closestSquare(state.position, squares);
         if(closest)
             return makeGoal(GOTO, { position: closest.value });
     }
 
     _squaresContaining(world, objectClass){
-        return Object.values(world).filter(square => containsObj(square, objectClass));
+        return Object.values(world).filter(square => containsSome(square, objectClass));
     }
 
     _closestSquare(position, squares){
@@ -240,7 +241,7 @@ export default class Ant extends Agent {
             return [UP, DOWN, LEFT, RIGHT].filter(action => {
                 const position = result(pos, action);
                 const square = state.world[canonical(position)];
-                return !!(square && !containsObj(square, Ant));
+                return !!(square && !containsSome(square, Ant, Rock));
             });
         };
 

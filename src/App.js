@@ -1,8 +1,8 @@
 import Environment from './Environment.js';
-import Agent from './Agent.js';
 import Ant from './Ant.js';
 import Hole from './Hole.js';
 import Leaf from './Leaf.js';
+import Rock from './Rock.js';
 import Render from './Render.js';
 
 const makeElement = str => document.createElement(str);
@@ -24,6 +24,10 @@ export default class App {
             viewRadius
         });
         this.environment.up();
+
+        const ant = new Ant();
+        this.environment.addAtRandom(ant);
+        ant.up();
     }
 
     _setupRender(root){
@@ -41,7 +45,7 @@ export default class App {
     _setupControls(root){
         const ul = document.createElement('ul');
 
-        this.buttons = [Ant, Hole, Leaf].map(objectClass => {
+        this.buttons = [Hole, Leaf, Rock].map(objectClass => {
             const li = makeElement('li');
 
             const button = makeElement('button');
@@ -62,8 +66,7 @@ export default class App {
 
         this.render.nextPositionSelection((...position) => {
             const object = new objectClass();
-            if(this.environment.add(object, ...position) && object instanceof Agent)
-                object.up();
+            this.environment.add(object, ...position);
 
             this.buttons.forEach(button => button.disabled = false);
         });

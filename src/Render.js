@@ -2,6 +2,7 @@ import { positionString } from './utils';
 import Ant from './Ant.js';
 import Hole from './Hole.js';
 import Leaf from './Leaf.js';
+import Rock from './Rock.js';
 
 export default class Render {
     constructor(environment, element, config = {}){
@@ -28,6 +29,7 @@ export default class Render {
             holeColor: '#444',
             holeBorderColor: '#725042',
             highlightColor: 'rgba(255, 255, 255, .5)',
+            rockColor: '#B2AA9F'
         }, config);
 
         if(this.config.unitSizePx === null)
@@ -43,6 +45,8 @@ export default class Render {
     }
 
     _draw(){
+        this.context.strokeStyle = '#222';
+
         this._drawBackground(this.environment);
         this._drawObjects(this.environment.objects());
         this._drawObservedArea(this.environment.agents());
@@ -126,6 +130,8 @@ export default class Render {
                 return this._drawHole(object);
             case object instanceof Leaf:
                 return this._drawLeaf(object);
+            case object instanceof Rock:
+                return this._drawRock(object);
         }
     }
 
@@ -193,6 +199,22 @@ export default class Render {
         this.context.moveTo(halfUnit, halfUnit - leafHalfHeight);
         this.context.lineTo(halfUnit, halfUnit + leafHalfHeight * 1.4);
         this.context.stroke();
+    }
+
+    _drawRock(rock){
+        const halfUnit = this.config.unitSizePx / 2;
+
+        const path = new Path2D();
+        path.moveTo(halfUnit, halfUnit * .5);
+        path.lineTo(halfUnit * 1.7, halfUnit * .9);
+        path.lineTo(halfUnit * 1.5, halfUnit * 1.5);
+        path.lineTo(halfUnit * .8, halfUnit * 1.7);
+        path.lineTo(halfUnit * .4, halfUnit * .8);
+        path.closePath();
+
+        this.context.fillStyle = this.config.rockColor;
+        this.context.fill(path);
+        this.context.stroke(path);
     }
 
     _drawCircle(x, y, radius, color){

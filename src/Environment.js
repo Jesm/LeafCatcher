@@ -62,17 +62,12 @@ export default class Environment {
     }
 
     addAtRandom(object){
-        const position = this._getAvailableRandomPosition();
-        if(position)
-            this.add(object, ...position);
-    }
+        const squares = Object.values(this.squares)
+            .filter(square => square.objects.length === 0);
 
-    _getAvailableRandomPosition(){
-        const positions = Object.values(this.squares)
-            .filter(pos => pos.objects.length === 0)
-            .map(pos => pos.value);
-
-        return positions.length ? positions[randomNumber(positions.length)] : null;
+        const square = squares.length ? squares[randomNumber(squares.length)] : null;
+        if(square)
+            this.add(object, ...square.value);
     }
 
     add(object, ...position){
