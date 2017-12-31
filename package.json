@@ -1,6 +1,6 @@
 {
   "name": "leaf-catcher",
-  "version": "1.1.0",
+  "version": "0.2.0",
   "description": "Simple agent architecture made for college. The ant must catch all leaves and drop them in the anthill hole.",
   "main": "./src/index.js",
   "scripts": {
